@@ -1,8 +1,8 @@
 # Contributing to Zo Tunnel
 
-Cảm ơn bạn quan tâm đến Zo Tunnel! 🚀
+Thank you for your interest in Zo Tunnel! 🚀
 
-Tài liệu này hướng dẫn cách đóng góp vào dự án.
+This document provides guidelines on how to contribute to the project.
 
 ## 🚀 Quick Start
 
@@ -14,55 +14,55 @@ Tài liệu này hướng dẫn cách đóng góp vào dự án.
 ### Setup
 
 ```bash
-# Fork repo trên GitHub, rồi clone về
+# Fork the repo on GitHub, then clone it
 git clone https://github.com/<your-username>/zo-tunnel.git
 cd zo-tunnel
 
 # Build
 cargo build
 
-# Chạy tests
+# Run tests
 cargo test --workspace
 
-# Chạy clippy (linter)
+# Run clippy (linter)
 cargo clippy --workspace -- -D warnings
 ```
 
-## 📝 Quy Trình Đóng Góp
+## 📝 Contribution Workflow
 
-### 1. Tạo Issue trước
+### 1. Create an Issue first
 
-Trước khi code, hãy tạo hoặc comment vào issue liên quan:
-- **Bug?** → Tạo [Bug Report](https://github.com/Zobite/zo-tunnel/issues/new?template=bug_report.md)
-- **Feature mới?** → Tạo [Feature Request](https://github.com/Zobite/zo-tunnel/issues/new?template=feature_request.md)
+Before writing code, create or comment on a related issue:
+- **Bug?** → Create a [Bug Report](https://github.com/Zobite/zo-tunnel/issues/new?template=bug_report.md)
+- **New feature?** → Create a [Feature Request](https://github.com/Zobite/zo-tunnel/issues/new?template=feature_request.md)
 
 ### 2. Fork & Branch
 
 ```bash
-# Fork repo trên GitHub
-# Clone fork về máy
+# Fork the repo on GitHub
+# Clone your fork locally
 git clone https://github.com/<your-username>/zo-tunnel.git
 
-# Tạo branch mới
-git checkout -b fix/ten-mieu-ta-ngan
+# Create a new branch
+git checkout -b fix/short-description
 ```
 
-**Quy tắc đặt tên branch:**
-- `fix/mieu-ta` — sửa bug
-- `feat/mieu-ta` — tính năng mới
-- `docs/mieu-ta` — cập nhật documentation
-- `refactor/mieu-ta` — refactor code
+**Branch naming conventions:**
+- `fix/description` — bug fix
+- `feat/description` — new feature
+- `docs/description` — documentation update
+- `refactor/description` — code refactor
 
 ### 3. Code
 
-- Tuân theo Rust coding conventions
-- Chạy `cargo fmt` trước khi commit
-- Chạy `cargo clippy --workspace -- -D warnings` — không được có warning
-- Thêm tests cho code mới nếu có thể
+- Follow Rust coding conventions
+- Run `cargo fmt` before committing
+- Run `cargo clippy --workspace -- -D warnings` — no warnings allowed
+- Add tests for new code when possible
 
 ### 4. Commit
 
-Sử dụng [Conventional Commits](https://www.conventionalcommits.org/):
+Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 feat: add WebSocket tunnel support
@@ -72,13 +72,13 @@ refactor: simplify rate limiter logic
 test: add routing extraction tests
 ```
 
-### 5. Tạo Pull Request
+### 5. Create a Pull Request
 
-- Push branch lên fork
-- Tạo PR về `main` branch của repo gốc
-- Điền đầy đủ PR template
-- Đợi CI pass (tests + clippy)
-- Maintainer sẽ review và phản hồi
+- Push your branch to your fork
+- Create a PR targeting the `main` branch of the original repo
+- Fill in the PR template completely
+- Wait for CI to pass (tests + clippy)
+- A maintainer will review and provide feedback
 
 ## 🏗️ Project Structure
 
@@ -100,21 +100,21 @@ zo-tunnel/
 # Unit tests
 cargo test --workspace
 
-# E2E test (cần build release trước)
+# E2E test (requires release build first)
 cargo build --release
 bash scripts/e2e_test.sh
 ```
 
 ## 📋 Coding Style
 
-- **Formatter:** `cargo fmt` (đặt theo rustfmt defaults)
+- **Formatter:** `cargo fmt` (uses rustfmt defaults)
 - **Linter:** `cargo clippy -- -D warnings`
-- **Error handling:** Dùng `anyhow::Result` + `.context("mô tả")`
-- **Logging:** Dùng `tracing::{info, debug, warn, error}`
-- **Async:** Tất cả I/O phải async (tokio)
+- **Error handling:** Use `anyhow::Result` + `.context("description")`
+- **Logging:** Use `tracing::{info, debug, warn, error}`
+- **Async:** All I/O must be async (tokio)
 
-## ❓ Câu Hỏi?
+## ❓ Questions?
 
-Nếu bạn có thắc mắc, hãy tạo một [Discussion](https://github.com/Zobite/zo-tunnel/discussions) hoặc mở Issue.
+If you have any questions, please create a [Discussion](https://github.com/Zobite/zo-tunnel/discussions) or open an Issue.
 
-Cảm ơn bạn đã đóng góp! ❤️
+Thank you for contributing! ❤️

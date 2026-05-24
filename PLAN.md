@@ -5,19 +5,19 @@
 
 ---
 
-## 1. Tổng Quan (Overview)
+## 1. Overview
 
-| Mục | Chi tiết |
+| Item | Details |
 |---|---|
-| **Tên dự án** | Zobite Zo Tunnel |
-| **Mục tiêu** | Cho phép người dùng Internet truy cập service chạy trên máy local (sau NAT/Firewall) thông qua 1 VPS trung gian |
-| **Thành phần** | `zo-tunnel-server` (chạy trên VPS) + `zo-tunnel-client` (chạy trên máy local) |
-| **Ngôn ngữ** | **Rust** — binary tĩnh, zero-cost abstractions, memory safety, hiệu năng ngang C/C++, async I/O mạnh mẽ với Tokio |
-| **License** | MIT (hoặc tuỳ chọn) |
+| **Project Name** | Zobite Zo Tunnel |
+| **Goal** | Allow internet users to access services running on a local machine (behind NAT/Firewall) through a VPS intermediary |
+| **Components** | `zo-tunnel-server` (runs on VPS) + `zo-tunnel-client` (runs on local machine) |
+| **Language** | **Rust** — static binary, zero-cost abstractions, memory safety, performance on par with C/C++, powerful async I/O with Tokio |
+| **License** | MIT (or configurable) |
 
 ---
 
-## 2. Kiến Trúc Tổng Thể (Architecture)
+## 2. Architecture
 
 ```
 ┌─────────────────┐          ┌──────────────────────────┐          ┌─────────────────┐
@@ -36,16 +36,16 @@
 2. User   ──HTTP──────────▶ Server:80      (Public request)
 3. Server ──Tunnel─────────▶ Client        (Forward request bytes)
 4. Client ──HTTP───────────▶ localhost:X    (Proxy to local service)
-5. Response đi ngược: Local → Client → Server → User
+5. Response flows back: Local → Client → Server → User
 ```
 
 ---
 
-## 3. Cấu Trúc Thư Mục Dự Kiến (Project Structure)
+## 3. Planned Project Structure
 
 ```
 zobite_zo-tunnel/
-├── PLAN.md                  # File này
+├── PLAN.md                  # This file
 ├── README.md
 ├── Cargo.toml               # Workspace root
 ├── Cargo.lock
@@ -54,9 +54,9 @@ zobite_zo-tunnel/
 │   ├── zo-tunnel-server/
 │   │   ├── Cargo.toml
 │   │   └── src/
-│   │       ├── main.rs          # Entry point cho zo-tunnel-server
+│   │       ├── main.rs          # Entry point for zo-tunnel-server
 │   │       ├── server.rs        # Core server logic
-│   │       ├── tunnel.rs        # Quản lý tunnel connections
+│   │       ├── tunnel.rs        # Tunnel connection management
 │   │       ├── proxy.rs         # HTTP reverse proxy handler
 │   │       ├── registry.rs      # Client registry (map client_id → connection)
 │   │       ├── dashboard.rs     # Dashboard API (Phase 3)
@@ -65,7 +65,7 @@ zobite_zo-tunnel/
 │   ├── zo-tunnel-client/
 │   │   ├── Cargo.toml
 │   │   └── src/
-│   │       ├── main.rs          # Entry point cho zo-tunnel-client
+│   │       ├── main.rs          # Entry point for zo-tunnel-client
 │   │       ├── client.rs        # Core client logic
 │   │       ├── tunnel.rs        # Tunnel connection handler
 │   │       └── proxy.rs         # Local proxy (forward to localhost:X)
@@ -76,8 +76,8 @@ zobite_zo-tunnel/
 │           └── lib.rs           # Message frame format, reader/writer, shared types
 │
 ├── configs/
-│   ├── server.yaml          # Server config mẫu
-│   └── client.yaml          # Client config mẫu
+│   ├── server.yaml          # Sample server config
+│   └── client.yaml          # Sample client config
 │
 ├── web/                     # Dashboard UI (Phase 3)
 │   ├── index.html
@@ -94,11 +94,11 @@ zobite_zo-tunnel/
 
 ---
 
-## 4. Protocol Design (Giao Thức Giữa Client ↔ Server)
+## 4. Protocol Design (Client ↔ Server)
 
 ### 4.1 Message Frame Format
 
-Mỗi message truyền qua tunnel sẽ có dạng binary frame:
+Each message transmitted through the tunnel uses a binary frame format:
 
 ```
 ┌──────────┬──────────┬───────────┬──────────────────┐
@@ -109,16 +109,16 @@ Mỗi message truyền qua tunnel sẽ có dạng binary frame:
 
 ### 4.2 Message Types
 
-| Type (hex) | Tên | Mô tả |
+| Type (hex) | Name | Description |
 |---|---|---|
-| `0x01` | `AUTH_REQ` | Client gửi token + client_id lên server |
-| `0x02` | `AUTH_RES` | Server phản hồi OK/FAIL |
-| `0x03` | `NEW_CONN` | Server báo client: "có request mới, mở proxy stream" |
-| `0x04` | `DATA` | Truyền raw bytes (request/response body) |
-| `0x05` | `PING` | Heartbeat từ client |
-| `0x06` | `PONG` | Server reply heartbeat |
-| `0x07` | `CLOSE` | Đóng 1 stream/connection cụ thể |
-| `0x08` | `ERROR` | Báo lỗi |
+| `0x01` | `AUTH_REQ` | Client sends token + client_id to server |
+| `0x02` | `AUTH_RES` | Server responds OK/FAIL |
+| `0x03` | `NEW_CONN` | Server notifies client: "new request, open proxy stream" |
+| `0x04` | `DATA` | Transmit raw bytes (request/response body) |
+| `0x05` | `PING` | Heartbeat from client |
+| `0x06` | `PONG` | Server heartbeat reply |
+| `0x07` | `CLOSE` | Close a specific stream/connection |
+| `0x08` | `ERROR` | Error notification |
 
 ### 4.3 Handshake Flow
 
@@ -139,113 +139,113 @@ Client                          Server
 
 ---
 
-## 5. Phân Chia Phase & Tasks
+## 5. Phase Breakdown & Tasks
 
 ---
 
-### Phase 1 — TCP Tunnel Cơ Bản (1 Client, 1 Port)
+### Phase 1 — Basic TCP Tunnel (1 Client, 1 Port)
 
-> **Mục tiêu:** Internet → VPS:6210 → Localhost:3000 hoạt động được.
+> **Goal:** Internet → VPS:6210 → Localhost:3000 working end-to-end.
 
-| # | Task | File liên quan |
+| # | Task | Related Files |
 |---|---|---|
-| 1.1 | Khởi tạo Cargo workspace + 3 crates (`zo-tunnel-server`, `zo-tunnel-client`, `zo-tunnel-protocol`) | `Cargo.toml`, `crates/*/Cargo.toml` |
-| 1.2 | Định nghĩa message frame format (Version, Type, Length, Payload) — dùng `bytes` crate | `crates/zo-tunnel-protocol/src/lib.rs` |
-| 1.3 | Viết async reader/writer cho protocol — dùng `tokio::io::{AsyncReadExt, AsyncWriteExt}` | `crates/zo-tunnel-protocol/src/lib.rs` |
-| 1.4 | **Server**: Lắng nghe TCP port 6200 (Control Channel) với `TcpListener`, chờ Client connect | `crates/zo-tunnel-server/src/server.rs` |
-| 1.5 | **Client**: Connect TCP tới `vps:6200` với `TcpStream`, gửi AUTH_REQ đơn giản (hardcode token) | `crates/zo-tunnel-client/src/client.rs` |
-| 1.6 | **Server**: Lắng nghe TCP port 6210 (Public Port). Khi có connection mới → gửi `NEW_CONN` cho Client | `crates/zo-tunnel-server/src/tunnel.rs` |
-| 1.7 | **Client**: Nhận `NEW_CONN` → mở TCP connection tới `localhost:3000` → `tokio::io::copy_bidirectional` | `crates/zo-tunnel-client/src/proxy.rs` |
-| 1.8 | **Pipe bidirectional**: Server pipe bytes giữa public connection ↔ tunnel stream | `crates/zo-tunnel-server/src/proxy.rs` |
-| 1.9 | Implement PING/PONG heartbeat (mỗi 10s) — dùng `tokio::time::interval` | `crates/zo-tunnel-protocol/src/lib.rs`, `crates/zo-tunnel-client/src/client.rs` |
-| 1.10 | Viết `main.rs` cho cả server và client (CLI flags với `clap` derive) | `crates/*/src/main.rs` |
-| 1.11 | **Test**: Chạy 1 HTTP server local → connect client → curl từ ngoài vào VPS:6210 | — |
+| 1.1 | Initialize Cargo workspace + 3 crates (`zo-tunnel-server`, `zo-tunnel-client`, `zo-tunnel-protocol`) | `Cargo.toml`, `crates/*/Cargo.toml` |
+| 1.2 | Define message frame format (Version, Type, Length, Payload) — using `bytes` crate | `crates/zo-tunnel-protocol/src/lib.rs` |
+| 1.3 | Write async reader/writer for protocol — using `tokio::io::{AsyncReadExt, AsyncWriteExt}` | `crates/zo-tunnel-protocol/src/lib.rs` |
+| 1.4 | **Server**: Listen on TCP port 6200 (Control Channel) with `TcpListener`, await Client connections | `crates/zo-tunnel-server/src/server.rs` |
+| 1.5 | **Client**: Connect TCP to `vps:6200` with `TcpStream`, send simple AUTH_REQ (hardcoded token) | `crates/zo-tunnel-client/src/client.rs` |
+| 1.6 | **Server**: Listen on TCP port 6210 (Public Port). On new connection → send `NEW_CONN` to Client | `crates/zo-tunnel-server/src/tunnel.rs` |
+| 1.7 | **Client**: Receive `NEW_CONN` → open TCP connection to `localhost:3000` → `tokio::io::copy_bidirectional` | `crates/zo-tunnel-client/src/proxy.rs` |
+| 1.8 | **Pipe bidirectional**: Server pipes bytes between public connection ↔ tunnel stream | `crates/zo-tunnel-server/src/proxy.rs` |
+| 1.9 | Implement PING/PONG heartbeat (every 10s) — using `tokio::time::interval` | `crates/zo-tunnel-protocol/src/lib.rs`, `crates/zo-tunnel-client/src/client.rs` |
+| 1.10 | Write `main.rs` for both server and client (CLI flags with `clap` derive) | `crates/*/src/main.rs` |
+| 1.11 | **Test**: Run a local HTTP server → connect client → curl from outside into VPS:6210 | — |
 
 **Deliverable Phase 1:**
 ```bash
-# Trên VPS
+# On the VPS
 ./zo-tunnel-server --control-port 6200 --public-port 6210
 
-# Trên máy local  
+# On the local machine
 ./zo-tunnel-client --server vps-ip:6200 --local localhost:3000 --token secret123
 
-# Test: trên bất kỳ máy nào
-curl http://vps-ip:6210    # → thấy response từ localhost:3000
+# Test: from any machine
+curl http://vps-ip:6210    # → see response from localhost:3000
 ```
 
 ---
 
 ### Phase 2 — HTTP Reverse Proxy + Multi-Client
 
-> **Mục tiêu:** Nhiều Client cùng connect. Routing bằng path hoặc subdomain.
+> **Goal:** Multiple clients connected simultaneously. Routing by path or subdomain.
 
-| # | Task | File liên quan |
+| # | Task | Related Files |
 |---|---|---|
-| 2.1 | **Client Registry**: `DashMap<String, TunnelConnection>`. Khi Client AUTH thành công thì đăng ký vào registry | `crates/zo-tunnel-server/src/registry.rs` |
-| 2.2 | **HTTP Listener**: Server chuyển public port sang HTTP mode — dùng `hyper`. Parse `Host` header hoặc URL path để xác định client_id | `crates/zo-tunnel-server/src/proxy.rs` |
-| 2.3 | **Path-based routing**: `http://vps-ip/client_a/...` → route tới client_a | `crates/zo-tunnel-server/src/proxy.rs` |
-| 2.4 | **Subdomain routing** (optional): `http://client_a.domain.com` → route tới client_a. Cần wildcard DNS `*.domain.com → VPS IP` | `crates/zo-tunnel-server/src/proxy.rs` |
-| 2.5 | Client config: cho phép user đặt `--id my-tunnel-name` | `crates/zo-tunnel-client/src/main.rs` |
-| 2.6 | **Graceful disconnect**: Khi client ngắt kết nối → xoá khỏi registry → trả 502 cho user | `crates/zo-tunnel-server/src/registry.rs` |
-| 2.7 | **Auto-reconnect**: Client tự reconnect khi mất kết nối (exponential backoff 1s → 2s → 4s → max 30s) | `crates/zo-tunnel-client/src/client.rs` |
-| 2.8 | YAML config file cho cả server và client — dùng `serde` + `serde_yaml` | `configs/server.yaml`, `configs/client.yaml` |
+| 2.1 | **Client Registry**: `DashMap<String, TunnelConnection>`. When Client AUTH succeeds, register in registry | `crates/zo-tunnel-server/src/registry.rs` |
+| 2.2 | **HTTP Listener**: Server switches public port to HTTP mode — using `hyper`. Parse `Host` header or URL path to determine client_id | `crates/zo-tunnel-server/src/proxy.rs` |
+| 2.3 | **Path-based routing**: `http://vps-ip/client_a/...` → route to client_a | `crates/zo-tunnel-server/src/proxy.rs` |
+| 2.4 | **Subdomain routing** (optional): `http://client_a.domain.com` → route to client_a. Requires wildcard DNS `*.domain.com → VPS IP` | `crates/zo-tunnel-server/src/proxy.rs` |
+| 2.5 | Client config: allow user to set `--id my-tunnel-name` | `crates/zo-tunnel-client/src/main.rs` |
+| 2.6 | **Graceful disconnect**: When client disconnects → remove from registry → return 502 to user | `crates/zo-tunnel-server/src/registry.rs` |
+| 2.7 | **Auto-reconnect**: Client auto-reconnects on connection loss (exponential backoff 1s → 2s → 4s → max 30s) | `crates/zo-tunnel-client/src/client.rs` |
+| 2.8 | YAML config file for both server and client — using `serde` + `serde_yaml` | `configs/server.yaml`, `configs/client.yaml` |
 
 **Deliverable Phase 2:**
 ```bash
 # Client A
 ./zo-tunnel-client --server vps:6200 --id webapp --local localhost:3000
 
-# Client B  
+# Client B
 ./zo-tunnel-client --server vps:6200 --id api --local localhost:8000
 
-# Truy cập
-curl http://vps-ip/webapp/    # → localhost:3000 của máy A
-curl http://vps-ip/api/       # → localhost:8000 của máy B
+# Access
+curl http://vps-ip/webapp/    # → localhost:3000 on machine A
+curl http://vps-ip/api/       # → localhost:8000 on machine B
 ```
 
 ---
 
 ### Phase 3 — Multiplexing, Auth, Dashboard, HTTPS
 
-> **Mục tiêu:** Production-ready. Nhiều request đồng thời, bảo mật, có dashboard.
+> **Goal:** Production-ready. Concurrent requests, security, dashboard.
 
-| # | Task | File liên quan |
+| # | Task | Related Files |
 |---|---|---|
-| 3.1 | **TCP Multiplexing**: Tích hợp `yamux` crate — 1 TCP connection thật chứa N virtual streams | `crates/zo-tunnel-protocol/src/lib.rs` (hoặc module `mux`) |
-| 3.2 | **Token Auth**: Server có danh sách token hợp lệ, client phải gửi đúng token mới được register | `crates/zo-tunnel-server/src/server.rs` |
-| 3.3 | **Rate Limiting**: Giới hạn số request/s, số connections per client — dùng `governor` crate | `crates/zo-tunnel-server/src/server.rs` |
-| 3.4 | **Metrics Collection**: Đếm bytes in/out, số active connections, request count, latency — dùng `metrics` + `metrics-exporter-prometheus` | `crates/zo-tunnel-server/src/metrics.rs` |
-| 3.5 | **Dashboard API**: REST API `/api/stats`, `/api/clients` — dùng `axum` | `crates/zo-tunnel-server/src/dashboard.rs` |
-| 3.6 | **Dashboard UI**: Web UI đơn giản hiện danh sách clients, traffic chart, logs | `web/*` |
-| 3.7 | **TLS/HTTPS**: Hỗ trợ `--tls-cert` và `--tls-key` — dùng `tokio-rustls`, hoặc auto Let's Encrypt với `rustls-acme` | `crates/zo-tunnel-server/src/server.rs` |
-| 3.8 | **Access Log**: Ghi log mỗi request — dùng `tracing` + `tracing-subscriber` | `crates/zo-tunnel-server/src/server.rs` |
-| 3.9 | **TCP mode** (không chỉ HTTP): Cho phép forward raw TCP (ví dụ SSH, database) | `crates/zo-tunnel-server/src/tunnel.rs` |
+| 3.1 | **TCP Multiplexing**: Integrate `yamux` crate — 1 real TCP connection contains N virtual streams | `crates/zo-tunnel-protocol/src/lib.rs` (or `mux` module) |
+| 3.2 | **Token Auth**: Server maintains a list of valid tokens, client must send correct token to register | `crates/zo-tunnel-server/src/server.rs` |
+| 3.3 | **Rate Limiting**: Limit requests/s, connections per client — using `governor` crate | `crates/zo-tunnel-server/src/server.rs` |
+| 3.4 | **Metrics Collection**: Count bytes in/out, active connections, request count, latency — using `metrics` + `metrics-exporter-prometheus` | `crates/zo-tunnel-server/src/metrics.rs` |
+| 3.5 | **Dashboard API**: REST API `/api/stats`, `/api/clients` — using `axum` | `crates/zo-tunnel-server/src/dashboard.rs` |
+| 3.6 | **Dashboard UI**: Simple web UI showing client list, traffic chart, logs | `web/*` |
+| 3.7 | **TLS/HTTPS**: Support `--tls-cert` and `--tls-key` — using `tokio-rustls`, or auto Let's Encrypt with `rustls-acme` | `crates/zo-tunnel-server/src/server.rs` |
+| 3.8 | **Access Log**: Log each request — using `tracing` + `tracing-subscriber` | `crates/zo-tunnel-server/src/server.rs` |
+| 3.9 | **TCP mode** (not just HTTP): Allow forwarding raw TCP (e.g. SSH, database) | `crates/zo-tunnel-server/src/tunnel.rs` |
 
 ---
 
-### Phase 4 — Đóng Gói & Phát Hành (Packaging & Release)
+### Phase 4 — Packaging & Release
 
-| # | Task | File liên quan |
+| # | Task | Related Files |
 |---|---|---|
 | 4.1 | Makefile: `make build-server`, `make build-client`, `make build-all` | `Makefile` |
-| 4.2 | Cross-compile: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` — dùng `cross` hoặc `cargo-zigbuild` | `scripts/build.sh` |
-| 4.3 | Dockerfile cho server (multi-stage: `rust:slim` → `debian:bookworm-slim` hoặc `scratch`) | `Dockerfile` |
+| 4.2 | Cross-compile: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` — using `cross` or `cargo-zigbuild` | `scripts/build.sh` |
+| 4.3 | Dockerfile for server (multi-stage: `rust:slim` → `debian:bookworm-slim` or `scratch`) | `Dockerfile` |
 | 4.4 | Docker Compose (server + dashboard) | `docker-compose.yaml` |
 | 4.5 | Install script: `curl -sSL https://... \| bash` | `scripts/install.sh` |
-| 4.6 | README.md hoàn chỉnh với hướng dẫn cài đặt, cấu hình, sử dụng | `README.md` |
+| 4.6 | Complete README.md with installation, configuration, and usage guides | `README.md` |
 | 4.7 | GitHub Actions CI/CD: test + build + release binary | `.github/workflows/release.yml` |
 
 ---
 
-## 6. Config Files Mẫu
+## 6. Sample Config Files
 
 ### server.yaml
 ```yaml
-control_port: 6200        # Port cho client kết nối
-public_port: 80           # Port cho user truy cập
-dashboard_port: 6220      # Port dashboard (optional)
-routing_mode: "path"      # "path" hoặc "subdomain"
-domain: ""                # Domain nếu dùng subdomain mode
+control_port: 6200        # Port for client connections
+public_port: 80           # Port for user access
+dashboard_port: 6220      # Dashboard port (optional)
+routing_mode: "path"      # "path" or "subdomain"
+domain: ""                # Domain if using subdomain mode
 tls:
   enabled: false
   cert: ""
@@ -270,49 +270,49 @@ reconnect:
 
 ---
 
-## 7. Rust Crates Cần Dùng
+## 7. Required Rust Crates
 
-| Crate | Mục đích |
+| Crate | Purpose |
 |---|---|
 | `tokio` | Async runtime — TCP listener, stream, timer, task spawning |
 | `bytes` | Efficient byte buffer (`BytesMut`, `Buf`, `BufMut`) |
-| `hyper` | HTTP/1.1 & HTTP/2 — dùng cho reverse proxy (Phase 2+) |
-| `axum` | Web framework cho Dashboard API (Phase 3) |
-| `yamux` | TCP multiplexing — nhiều virtual stream trên 1 TCP connection |
+| `hyper` | HTTP/1.1 & HTTP/2 — used for reverse proxy (Phase 2+) |
+| `axum` | Web framework for Dashboard API (Phase 3) |
+| `yamux` | TCP multiplexing — multiple virtual streams on 1 TCP connection |
 | `clap` (derive) | CLI argument parser |
 | `serde` + `serde_yaml` | Config file parsing (YAML) |
 | `tracing` + `tracing-subscriber` | Structured async logging |
-| `tokio-rustls` | TLS support cho public listener |
+| `tokio-rustls` | TLS support for public listener |
 | `rustls-acme` | Auto Let's Encrypt (Phase 3) |
-| `dashmap` | Concurrent hashmap cho client registry |
+| `dashmap` | Concurrent hashmap for client registry |
 | `governor` | Rate limiting (Phase 3) |
 | `metrics` + `metrics-exporter-prometheus` | Metrics collection (Phase 3) |
 | `anyhow` / `thiserror` | Error handling |
 
 ---
 
-## 8. Milestone & Ước Tính Thời Gian
+## 8. Milestones & Time Estimates
 
-| Phase | Mô tả | Ước tính |
+| Phase | Description | Estimate |
 |---|---|---|
-| **Phase 1** | TCP tunnel cơ bản (1 client, 1 port) | 2-3 ngày |
-| **Phase 2** | HTTP proxy + multi-client + routing | 2-3 ngày |
-| **Phase 3** | Mux, auth, dashboard, HTTPS | 3-5 ngày |
-| **Phase 4** | Đóng gói, Docker, CI/CD | 1-2 ngày |
-| **Tổng** | | **~8-13 ngày** |
+| **Phase 1** | Basic TCP tunnel (1 client, 1 port) | 2-3 days |
+| **Phase 2** | HTTP proxy + multi-client + routing | 2-3 days |
+| **Phase 3** | Mux, auth, dashboard, HTTPS | 3-5 days |
+| **Phase 4** | Packaging, Docker, CI/CD | 1-2 days |
+| **Total** | | **~8-13 days** |
 
 ---
 
-## 9. Tham Khảo (References)
+## 9. References
 
-Các dự án tương tự để học hỏi:
-- [rathole](https://github.com/rapiz1/rathole) — **Rust**, nhẹ và nhanh, kiến trúc tương tự
-- [bore](https://github.com/ekzhang/bore) — **Rust**, cực đơn giản, tham khảo code tốt
-- [ngrok](https://github.com/inconshreveable/ngrok) — bản gốc (v1 open-source)
-- [frp](https://github.com/fatedier/frp) — Go, rất phổ biến, hỗ trợ TCP/UDP/HTTP
+Similar projects for reference:
+- [rathole](https://github.com/rapiz1/rathole) — **Rust**, lightweight and fast, similar architecture
+- [bore](https://github.com/ekzhang/bore) — **Rust**, extremely simple, good code reference
+- [ngrok](https://github.com/inconshreveable/ngrok) — the original (v1 open-source)
+- [frp](https://github.com/fatedier/frp) — Go, very popular, supports TCP/UDP/HTTP
 - [localtunnel](https://github.com/localtunnel/localtunnel) — Node.js
 - [pgrok](https://github.com/pgrok/pgrok) — Go, self-hosted ngrok alternative
 
 ---
 
-> **Bước tiếp theo:** Bắt đầu Phase 1 — Init Cargo workspace và viết protocol message format.
+> **Next step:** Start Phase 1 — Init Cargo workspace and write the protocol message format.

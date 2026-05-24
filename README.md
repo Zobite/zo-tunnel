@@ -58,28 +58,28 @@ Internet  ───▶  VPS (zo-tunnel-server)  ◀───tunnel───  You
 
 ## 🚀 Quick Start
 
-### 1. Cài server trên VPS (Linux)
+### 1. Install server on VPS (Linux)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/setup-server.sh | sudo bash
 ```
 
-Script tự động: download binary → tạo systemd service → mở firewall → start server.
-Sau khi chạy xong sẽ hiển thị **token** và **lệnh connect cho client**.
+Automated script: download binary → create systemd service → open firewall → start server.
+Once completed, it will display the **token** and the **client connect command**.
 
-Hoặc cài với token tùy chọn:
+Or install with a custom token:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/setup-server.sh | ZO_TOKEN=my-secret sudo bash
 ```
 
-### 2. Cài client trên máy local (macOS / Linux)
+### 2. Install client on local machine (macOS / Linux)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/install.sh | bash
 ```
 
-### 3. Kết nối
+### 3. Connect
 
 ```bash
 zo-tunnel-client \
@@ -89,7 +89,7 @@ zo-tunnel-client \
   --token my-secret-token
 ```
 
-### 4. Truy cập từ bất kỳ đâu
+### 4. Access from anywhere
 
 ```bash
 curl http://your-vps-ip:6210/my-webapp/
@@ -320,13 +320,70 @@ zo-tunnel/
 
 ## 🐳 Docker
 
-```bash
-# Build images
-docker build -t zo-tunnel-server --target server .
-docker build -t zo-tunnel-client --target client .
+### Quick Start (no source code needed)
 
-# Or use Docker Compose
-docker compose up -d
+Run the server directly from the pre-built image — no cloning required:
+
+```bash
+docker run -d \
+  --name zo-tunnel-server \
+  -p 6200:6200 \
+  -p 6210:6210 \
+  -p 6220:6220 \
+  -p 10000-10020:10000-10020 \
+  -e ZO_TOKEN=my-secret-token \
+  -e RUST_LOG=info \
+  --restart unless-stopped \
+  ghcr.io/zobite/zo-tunnel-server:latest
+```
+
+That's it! Your server is now running. Connect a client:
+
+```bash
+zo-tunnel-client --server your-vps-ip:6200 --local localhost:3000 --id myapp --token my-secret-token
+```
+
+| Port | Purpose |
+|---|---|
+| `6200` | Control channel (client connections) |
+| `6210` | Public HTTP proxy |
+| `6220` | Dashboard UI |
+| `10000-10020` | Dedicated TCP tunnel ports |
+
+### With a custom config file
+
+```bash
+docker run -d \
+  --name zo-tunnel-server \
+  -p 6200:6200 -p 6210:6210 -p 6220:6220 \
+  -p 10000-10020:10000-10020 \
+  -v /path/to/server.yaml:/etc/zo-tunnel/server.yaml \
+  --restart unless-stopped \
+  ghcr.io/zobite/zo-tunnel-server:latest \
+  --config /etc/zo-tunnel/server.yaml
+```
+
+### Docker Compose (requires cloning the repo)
+
+```bash
+git clone https://github.com/Zobite/zo-tunnel.git && cd zo-tunnel
+
+ZO_TOKEN=my-secret-token docker compose up -d
+
+# Check logs
+docker compose logs -f
+```
+
+### Build images from source
+
+```bash
+git clone https://github.com/Zobite/zo-tunnel.git && cd zo-tunnel
+
+# Build server image
+docker build -t zo-tunnel-server --target server .
+
+# Build client image
+docker build -t zo-tunnel-client --target client .
 ```
 
 ---
