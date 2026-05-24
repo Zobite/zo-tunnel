@@ -1,6 +1,4 @@
-<![CDATA[<div align="center">
-
-# 🚀 Zobite Zobite Tunnel
+# 🚀 Zo Tunnel
 
 **Self-hosted ngrok alternative — expose any local service to the internet through your own VPS.**
 
@@ -10,8 +8,6 @@
 ```
 Internet  ───▶  VPS (zobite-tunnel-server)  ◀───tunnel───  Your Machine (zobite-tunnel-client)  ───▶  localhost:3000
 ```
-
-</div>
 
 ---
 
@@ -62,49 +58,40 @@ Internet  ───▶  VPS (zobite-tunnel-server)  ◀───tunnel─── 
 
 ## 🚀 Quick Start
 
-### Prerequisites
-
-- [Rust](https://rustup.rs/) 1.75+ (for building from source)
-- A VPS with a public IP (for the server)
-
-### Build
+### 1. Cài server trên VPS (Linux)
 
 ```bash
-git clone https://github.com/Zobite/zo-tunnel.git
-cd zobite-tunnel
-cargo build --release
-
-# Binaries:
-#   target/release/zobite-tunnel-server  (5.5 MB)
-#   target/release/zobite-tunnel-client  (1.8 MB)
+curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/setup-server.sh | sudo bash
 ```
 
-### Run
+Script tự động: download binary → tạo systemd service → mở firewall → start server.
+Sau khi chạy xong sẽ hiển thị **token** và **lệnh connect cho client**.
 
-**1. Start the server on your VPS:**
+Hoặc cài với token tùy chọn:
 
 ```bash
-./zobite-tunnel-server \
-  --control-port 7000 \
-  --public-port 8080 \
-  --dashboard-port 9000 \
-  --token my-secret-token
+curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/setup-server.sh | ZOBITE_TOKEN=my-secret sudo bash
 ```
 
-**2. Start the client on your local machine:**
+### 2. Cài client trên máy local (macOS / Linux)
 
 ```bash
-./zobite-tunnel-client \
+curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/install.sh | bash
+```
+
+### 3. Kết nối
+
+```bash
+zobite-tunnel-client \
   --server your-vps-ip:7000 \
   --local localhost:3000 \
   --id my-webapp \
   --token my-secret-token
 ```
 
-**3. Access your local service from anywhere:**
+### 4. Truy cập từ bất kỳ đâu
 
 ```bash
-# Path-based routing (default)
 curl http://your-vps-ip:8080/my-webapp/
 # → Response from your localhost:3000 🎉
 
@@ -116,13 +103,13 @@ open http://your-vps-ip:9000
 
 ```bash
 # Client A — web frontend (HTTP mode)
-./zobite-tunnel-client --server vps:7000 --id webapp --local localhost:3000 --token secret
+zobite-tunnel-client --server vps:7000 --id webapp --local localhost:3000 --token secret
 
 # Client B — API server (HTTP mode)
-./zobite-tunnel-client --server vps:7000 --id api --local localhost:8000 --token secret
+zobite-tunnel-client --server vps:7000 --id api --local localhost:8000 --token secret
 
 # Client C — SSH server (TCP mode — gets dedicated port)
-./zobite-tunnel-client --server vps:7000 --id ssh --local localhost:22 --token secret --tcp
+zobite-tunnel-client --server vps:7000 --id ssh --local localhost:22 --token secret --tcp
 
 # Access HTTP tunnels
 curl http://vps:8080/webapp/     # → localhost:3000 (Client A)
@@ -130,6 +117,16 @@ curl http://vps:8080/api/users   # → localhost:8000/users (Client B)
 
 # Access TCP tunnel (port assigned by server, e.g. 10000)
 ssh user@vps -p 10000            # → localhost:22 (Client C)
+```
+
+### Build from source (optional)
+
+```bash
+git clone https://github.com/Zobite/zo-tunnel.git
+cd zo-tunnel
+cargo build --release
+# → target/release/zobite-tunnel-server (5.5 MB)
+# → target/release/zobite-tunnel-client (1.8 MB)
 ```
 
 ---
@@ -377,9 +374,4 @@ MIT — see [LICENSE](LICENSE) for details.
 
 ---
 
-<div align="center">
-
 **Built with ❤️ and 🦀 Rust**
-
-</div>
-]]>

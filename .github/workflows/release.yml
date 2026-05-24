@@ -157,13 +157,12 @@ jobs:
           body: |
             ## Install
 
-            **Mac (Homebrew):**
+            **Server (Linux VPS):**
             ```bash
-            brew tap ${{ github.repository_owner }}/tap
-            brew install zobite-tunnel
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/setup-server.sh | sudo bash
             ```
 
-            **Linux/Mac (one-liner):**
+            **Client (macOS / Linux):**
             ```bash
             curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | bash
             ```
@@ -175,39 +174,3 @@ jobs:
               ${{ env.REGISTRY }}/${{ github.repository }}-server:latest
             ```
 
-  # ─── Update Homebrew formula ───
-  homebrew:
-    name: Update Homebrew
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: binaries-*
-          merge-multiple: true
-
-      - name: Get SHA256 for Darwin binaries
-        id: shas
-        run: |
-          VERSION=${GITHUB_REF_NAME}
-          SHA_ARM=$(shasum -a 256 artifacts/zobite-tunnel-client-${VERSION}-darwin-arm64.tar.gz 2>/dev/null | cut -d' ' -f1 || sha256sum artifacts/zobite-tunnel-client-${VERSION}-darwin-arm64.tar.gz | cut -d' ' -f1)
-          SHA_AMD=$(shasum -a 256 artifacts/zobite-tunnel-client-${VERSION}-darwin-amd64.tar.gz 2>/dev/null | cut -d' ' -f1 || sha256sum artifacts/zobite-tunnel-client-${VERSION}-darwin-amd64.tar.gz | cut -d' ' -f1)
-          echo "sha_arm64=${SHA_ARM}" >> $GITHUB_OUTPUT
-          echo "sha_amd64=${SHA_AMD}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
-
-      - name: Update Homebrew formula
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          repository: ${{ github.repository_owner }}/homebrew-tap
-          event-type: update-formula
-          client-payload: |
-            {
-              "version": "${{ steps.shas.outputs.version }}",
-              "sha_arm64": "${{ steps.shas.outputs.sha_arm64 }}",
-              "sha_amd64": "${{ steps.shas.outputs.sha_amd64 }}"
-            }
