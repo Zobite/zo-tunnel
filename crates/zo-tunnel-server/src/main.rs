@@ -11,42 +11,42 @@ mod registry;
 mod server;
 
 #[derive(Parser, Debug)]
-#[command(name = "zobite-tunnel-server", about = "Zobite Tunnel tunnel server — run on your VPS")]
+#[command(name = "zo-tunnel-server", about = "Zo Tunnel tunnel server — run on your VPS")]
 struct Cli {
     /// Path to YAML config file
-    #[arg(long, short, env = "ZOBITE_CONFIG")]
+    #[arg(long, short, env = "ZO_CONFIG")]
     config: Option<PathBuf>,
 
     /// Port for client control connections
-    #[arg(long, env = "ZOBITE_CONTROL_PORT")]
+    #[arg(long, env = "ZO_CONTROL_PORT")]
     control_port: Option<u16>,
 
     /// Port for public traffic
-    #[arg(long, env = "ZOBITE_PUBLIC_PORT")]
+    #[arg(long, env = "ZO_PUBLIC_PORT")]
     public_port: Option<u16>,
 
     /// Port for dashboard
-    #[arg(long, env = "ZOBITE_DASHBOARD_PORT")]
+    #[arg(long, env = "ZO_DASHBOARD_PORT")]
     dashboard_port: Option<u16>,
 
     /// Required token(s) for client authentication (comma-separated)
-    #[arg(long, env = "ZOBITE_TOKEN")]
+    #[arg(long, env = "ZO_TOKEN")]
     token: Option<String>,
 
     /// Routing mode: path or subdomain
-    #[arg(long, env = "ZOBITE_ROUTING_MODE")]
+    #[arg(long, env = "ZO_ROUTING_MODE")]
     routing_mode: Option<String>,
 
     /// Domain for subdomain routing (e.g. example.com)
-    #[arg(long, env = "ZOBITE_DOMAIN")]
+    #[arg(long, env = "ZO_DOMAIN")]
     domain: Option<String>,
 
     /// TLS certificate file
-    #[arg(long, env = "ZOBITE_TLS_CERT")]
+    #[arg(long, env = "ZO_TLS_CERT")]
     tls_cert: Option<String>,
 
     /// TLS private key file
-    #[arg(long, env = "ZOBITE_TLS_KEY")]
+    #[arg(long, env = "ZO_TLS_KEY")]
     tls_key: Option<String>,
 }
 
@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
     }
 
     tracing::info!("╔══════════════════════════════════════╗");
-    tracing::info!("║          Zobite Tunnel Server v{}         ║", env!("CARGO_PKG_VERSION"));
+    tracing::info!("║          Zo Tunnel Server v{}         ║", env!("CARGO_PKG_VERSION"));
     tracing::info!("╚══════════════════════════════════════╝");
     tracing::info!(
         "Control:{} | Public:{} | Dashboard:{} | Routing:{:?} | TLS:{}",

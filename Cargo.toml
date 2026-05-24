@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/zobite-tunnel-protocol",
-    "crates/zobite-tunnel-server",
-    "crates/zobite-tunnel-client",
+    "crates/zo-tunnel-protocol",
+    "crates/zo-tunnel-server",
+    "crates/zo-tunnel-client",
 ]
 
 [workspace.dependencies]

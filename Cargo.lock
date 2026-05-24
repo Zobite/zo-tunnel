@@ -1710,7 +1710,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
-name = "zobite-tunnel-client"
+name = "zo-tunnel-client"
 version = "0.1.2"
 dependencies = [
  "anyhow",
@@ -1725,11 +1725,11 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "yamux",
- "zobite-tunnel-protocol",
+ "zo-tunnel-protocol",
 ]
 
 [[package]]
-name = "zobite-tunnel-protocol"
+name = "zo-tunnel-protocol"
 version = "0.1.2"
 dependencies = [
  "anyhow",
@@ -1742,7 +1742,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zobite-tunnel-server"
+name = "zo-tunnel-server"
 version = "0.1.2"
 dependencies = [
  "anyhow",
@@ -1768,5 +1768,5 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "yamux",
- "zobite-tunnel-protocol",
+ "zo-tunnel-protocol",
 ]

@@ -1,5 +1,5 @@
 [package]
-name = "zobite-tunnel-protocol"
+name = "zo-tunnel-protocol"
 version = "0.1.2"
 edition = "2021"
 

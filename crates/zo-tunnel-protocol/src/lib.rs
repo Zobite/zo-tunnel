@@ -1,4 +1,4 @@
-//! Zobite Tunnel Protocol — Message definitions and async reader/writer.
+//! Zo Tunnel Protocol — Message definitions and async reader/writer.
 //!
 //! Binary frame format:
 //! ```text

@@ -30,7 +30,7 @@ fn error_response(status: StatusCode, msg: &str) -> Response<BoxBody> {
     Response::builder()
         .status(status)
         .header("content-type", "application/json")
-        .header("x-powered-by", "zobite-tunnel")
+        .header("x-powered-by", "zo-tunnel")
         .body(full_body(body))
         .unwrap()
 }
@@ -98,7 +98,7 @@ fn build_forwarded_request(
 
     // Add forwarding headers
     if let Ok(val) = hyper::header::HeaderValue::from_str(client_id) {
-        parts.headers.insert("x-zobite-tunnel-client", val);
+        parts.headers.insert("x-zo-tunnel-client", val);
     }
 
     // Force Connection: close for clean stream lifecycle

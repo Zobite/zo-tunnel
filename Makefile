@@ -5,10 +5,10 @@
 build: build-all
 
 build-server:
-	cargo build --release -p zobite-tunnel-server
+	cargo build --release -p zo-tunnel-server
 
 build-client:
-	cargo build --release -p zobite-tunnel-client
+	cargo build --release -p zo-tunnel-client
 
 build-all:
 	cargo build --release
@@ -24,13 +24,13 @@ test-e2e: build-all
 # ── Run (dev) ──────────────────────────────────────────
 
 run-server:
-	RUST_LOG=info cargo run -p zobite-tunnel-server -- \
+	RUST_LOG=info cargo run -p zo-tunnel-server -- \
 		--control-port 7000 \
 		--public-port 8080 \
 		--dashboard-port 9000
 
 run-client:
-	RUST_LOG=info cargo run -p zobite-tunnel-client -- \
+	RUST_LOG=info cargo run -p zo-tunnel-client -- \
 		--server 127.0.0.1:7000 \
 		--local localhost:3000 \
 		--id my-app
@@ -38,8 +38,8 @@ run-client:
 # ── Docker ─────────────────────────────────────────────
 
 docker:
-	docker build -t zobite-tunnel-server --target server .
-	docker build -t zobite-tunnel-client --target client .
+	docker build -t zo-tunnel-server --target server .
+	docker build -t zo-tunnel-client --target client .
 
 docker-up:
 	docker compose up -d

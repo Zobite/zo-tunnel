@@ -7,26 +7,26 @@ mod client;
 mod config;
 
 #[derive(Parser, Debug)]
-#[command(name = "zobite-tunnel-client", about = "Zobite Tunnel tunnel client — run on your local machine")]
+#[command(name = "zo-tunnel-client", about = "Zo Tunnel tunnel client — run on your local machine")]
 struct Cli {
     /// Path to YAML config file
-    #[arg(long, short, env = "ZOBITE_CONFIG")]
+    #[arg(long, short, env = "ZO_CONFIG")]
     config: Option<PathBuf>,
 
     /// Server address (host:port)
-    #[arg(long, env = "ZOBITE_SERVER")]
+    #[arg(long, env = "ZO_SERVER")]
     server: Option<String>,
 
     /// Local service address to forward to
-    #[arg(long, env = "ZOBITE_LOCAL")]
+    #[arg(long, env = "ZO_LOCAL")]
     local: Option<String>,
 
     /// Client ID (tunnel name)
-    #[arg(long, env = "ZOBITE_CLIENT_ID")]
+    #[arg(long, env = "ZO_CLIENT_ID")]
     id: Option<String>,
 
     /// Authentication token
-    #[arg(long, env = "ZOBITE_TOKEN")]
+    #[arg(long, env = "ZO_TOKEN")]
     token: Option<String>,
 
     /// Request a dedicated TCP port (for SSH, databases, raw TCP)
@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
     }
 
     tracing::info!("╔══════════════════════════════════════╗");
-    tracing::info!("║          Zobite Tunnel Client v{}         ║", env!("CARGO_PKG_VERSION"));
+    tracing::info!("║          Zo Tunnel Client v{}         ║", env!("CARGO_PKG_VERSION"));
     tracing::info!("╚══════════════════════════════════════╝");
     tracing::info!(
         "ID:'{}' | Server:{} | Local:{} | Mode:{} | Reconnect:{}",

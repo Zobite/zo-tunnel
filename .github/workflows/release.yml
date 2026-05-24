@@ -72,18 +72,18 @@ jobs:
           mkdir -p dist
 
           # Server binary
-          if [ -f "target/${{ matrix.target }}/release/zobite-tunnel-server" ]; then
-            TAR_NAME="zobite-tunnel-server-${VERSION}-${{ matrix.label }}.tar.gz"
+          if [ -f "target/${{ matrix.target }}/release/zo-tunnel-server" ]; then
+            TAR_NAME="zo-tunnel-server-${VERSION}-${{ matrix.label }}.tar.gz"
             tar -czf "dist/${TAR_NAME}" \
-              -C "target/${{ matrix.target }}/release" zobite-tunnel-server
+              -C "target/${{ matrix.target }}/release" zo-tunnel-server
             echo "server_tar=${TAR_NAME}" >> $GITHUB_ENV
           fi
 
           # Client binary
-          if [ -f "target/${{ matrix.target }}/release/zobite-tunnel-client" ]; then
-            TAR_NAME="zobite-tunnel-client-${VERSION}-${{ matrix.label }}.tar.gz"
+          if [ -f "target/${{ matrix.target }}/release/zo-tunnel-client" ]; then
+            TAR_NAME="zo-tunnel-client-${VERSION}-${{ matrix.label }}.tar.gz"
             tar -czf "dist/${TAR_NAME}" \
-              -C "target/${{ matrix.target }}/release" zobite-tunnel-client
+              -C "target/${{ matrix.target }}/release" zo-tunnel-client
             echo "client_tar=${TAR_NAME}" >> $GITHUB_ENV
           fi
 
@@ -170,7 +170,7 @@ jobs:
             **Docker (server):**
             ```bash
             docker run -d -p 7000:7000 -p 8080:8080 -p 9000:9000 \
-              -e ZOBITE_TOKEN=your-token \
+              -e ZO_TOKEN=your-token \
               ${{ env.REGISTRY }}/${{ github.repository }}-server:latest
             ```
 

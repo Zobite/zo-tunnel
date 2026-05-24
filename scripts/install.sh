@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════════════
-#  Zobite Tunnel Installer
+#  Zo Tunnel Installer
 #  Install server or client with one command:
 #
 #  Server: curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/install.sh | bash -s server
@@ -28,7 +28,7 @@ fail()  { echo -e "${RED}❌${NC} $*"; exit 1; }
 
 echo ""
 echo -e "${BLUE}╔══════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║        Zobite Tunnel Installer               ║${NC}"
+echo -e "${BLUE}║        Zo Tunnel Installer               ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
 echo ""
 
@@ -80,9 +80,9 @@ trap "rm -rf $TMP_DIR" EXIT
 
 install_binary() {
     local binary="$1"
-    local url="https://github.com/${REPO}/releases/download/${LATEST}/zobite-tunnel-${binary}-${LATEST}-${TARGET}.tar.gz"
+    local url="https://github.com/${REPO}/releases/download/${LATEST}/zo-tunnel-${binary}-${LATEST}-${TARGET}.tar.gz"
 
-    info "Downloading zobite-tunnel-${binary}..."
+    info "Downloading zo-tunnel-${binary}..."
     $DOWNLOAD_OUT "$TMP_DIR/${binary}.tar.gz" "$url" 2>/dev/null || {
         fail "Download failed: $url"
     }
@@ -93,14 +93,14 @@ install_binary() {
 
     # Install to /usr/local/bin
     if [ -w "$INSTALL_DIR" ]; then
-        cp "$TMP_DIR/zobite-tunnel-${binary}" "$INSTALL_DIR/"
+        cp "$TMP_DIR/zo-tunnel-${binary}" "$INSTALL_DIR/"
     else
         info "Need sudo to install to $INSTALL_DIR"
-        sudo cp "$TMP_DIR/zobite-tunnel-${binary}" "$INSTALL_DIR/"
+        sudo cp "$TMP_DIR/zo-tunnel-${binary}" "$INSTALL_DIR/"
     fi
 
-    chmod +x "$INSTALL_DIR/zobite-tunnel-${binary}"
-    ok "Installed zobite-tunnel-${binary} → ${INSTALL_DIR}/zobite-tunnel-${binary}"
+    chmod +x "$INSTALL_DIR/zo-tunnel-${binary}"
+    ok "Installed zo-tunnel-${binary} → ${INSTALL_DIR}/zo-tunnel-${binary}"
 }
 
 case "$COMPONENT" in
@@ -128,16 +128,16 @@ echo ""
 
 if [ "$COMPONENT" = "client" ] || [ "$COMPONENT" = "all" ]; then
     echo "  Client usage:"
-    echo "    zobite-tunnel-client --server YOUR_VPS:7000 --local localhost:3000 --id app --token SECRET"
+    echo "    zo-tunnel-client --server YOUR_VPS:7000 --local localhost:3000 --id app --token SECRET"
     echo ""
 fi
 
 if [ "$COMPONENT" = "server" ] || [ "$COMPONENT" = "all" ]; then
     echo "  Server usage:"
-    echo "    zobite-tunnel-server --token SECRET"
+    echo "    zo-tunnel-server --token SECRET"
     echo ""
     echo "  Or with systemd (Linux):"
-    echo "    sudo zobite-tunnel-server --token SECRET &"
+    echo "    sudo zo-tunnel-server --token SECRET &"
     echo ""
 fi
 

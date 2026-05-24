@@ -1,14 +1,14 @@
 #!/bin/bash
 set -e
 
-# E2E test for Zobite Tunnel — tests HTTP mode + TCP mode
-# Tests: local HTTP server → zobite-tunnel-client → zobite-tunnel-server → curl
+# E2E test for Zo Tunnel — tests HTTP mode + TCP mode
+# Tests: local HTTP server → zo-tunnel-client → zo-tunnel-server → curl
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-SERVER_BIN="$PROJECT_DIR/target/release/zobite-tunnel-server"
-CLIENT_BIN="$PROJECT_DIR/target/release/zobite-tunnel-client"
+SERVER_BIN="$PROJECT_DIR/target/release/zo-tunnel-server"
+CLIENT_BIN="$PROJECT_DIR/target/release/zo-tunnel-client"
 
 CONTROL_PORT=17000
 PUBLIC_PORT=18080
@@ -25,7 +25,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "════════════════════════════════════════"
-echo "  Zobite Tunnel E2E Test"
+echo "  Zo Tunnel E2E Test"
 echo "════════════════════════════════════════"
 echo ""
 
@@ -41,8 +41,8 @@ curl -s http://127.0.0.1:$LOCAL_PORT/ >/dev/null || { echo "❌ HTTP server 1 fa
 curl -s http://127.0.0.1:$LOCAL_PORT2/ >/dev/null || { echo "❌ HTTP server 2 failed"; exit 1; }
 echo "   ✅ Local HTTP servers running (port $LOCAL_PORT, $LOCAL_PORT2)"
 
-# 2. Start Zobite Tunnel server
-echo "2️⃣  Starting zobite-tunnel-server..."
+# 2. Start Zo Tunnel server
+echo "2️⃣  Starting zo-tunnel-server..."
 RUST_LOG=info $SERVER_BIN \
     --control-port $CONTROL_PORT \
     --public-port $PUBLIC_PORT \
@@ -54,7 +54,7 @@ sleep 2
 echo "   ✅ Server started"
 
 # 3. Start HTTP mode client
-echo "3️⃣  Starting zobite-tunnel-client (HTTP mode, id=test-app)..."
+echo "3️⃣  Starting zo-tunnel-client (HTTP mode, id=test-app)..."
 RUST_LOG=info $CLIENT_BIN \
     --server 127.0.0.1:$CONTROL_PORT \
     --local 127.0.0.1:$LOCAL_PORT \
@@ -66,7 +66,7 @@ sleep 2
 echo "   ✅ HTTP client started"
 
 # 4. Start TCP mode client
-echo "4️⃣  Starting zobite-tunnel-client (TCP mode, id=tcp-app)..."
+echo "4️⃣  Starting zo-tunnel-client (TCP mode, id=tcp-app)..."
 RUST_LOG=info $CLIENT_BIN \
     --server 127.0.0.1:$CONTROL_PORT \
     --local 127.0.0.1:$LOCAL_PORT2 \

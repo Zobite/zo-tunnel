@@ -1,4 +1,4 @@
-// Zobite Tunnel Dashboard — auto-refreshing client
+// Zo Tunnel Dashboard — auto-refreshing client
 
 const REFRESH_MS = 2000;
 

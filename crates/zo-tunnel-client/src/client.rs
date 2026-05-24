@@ -1,11 +1,11 @@
-//! Zobite Tunnel tunnel client — connects to server, accepts yamux streams, proxies to local service.
+//! Zo Tunnel tunnel client — connects to server, accepts yamux streams, proxies to local service.
 
 use anyhow::{bail, Context, Result};
 use std::future::poll_fn;
 use tokio::io;
 use tokio::net::TcpStream;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
-use zobite_tunnel_protocol::*;
+use zo_tunnel_protocol::*;
 
 pub struct Client {
     server_addr: String,

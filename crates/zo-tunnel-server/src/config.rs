@@ -114,13 +114,13 @@ impl Default for TcpPortConfig {
 }
 
 fn default_control_port() -> u16 {
-    zobite_tunnel_protocol::DEFAULT_CONTROL_PORT
+    zo_tunnel_protocol::DEFAULT_CONTROL_PORT
 }
 fn default_public_port() -> u16 {
-    zobite_tunnel_protocol::DEFAULT_PUBLIC_PORT
+    zo_tunnel_protocol::DEFAULT_PUBLIC_PORT
 }
 fn default_dashboard_port() -> u16 {
-    zobite_tunnel_protocol::DEFAULT_DASHBOARD_PORT
+    zo_tunnel_protocol::DEFAULT_DASHBOARD_PORT
 }
 fn default_log_level() -> String {
     "info".into()

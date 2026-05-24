@@ -1,4 +1,4 @@
-# Zobite Tunnel Client Configuration
+# Zo Tunnel Client Configuration
 server: "vps-ip:7000"
 client_id: "my-webapp"
 local_addr: "localhost:3000"

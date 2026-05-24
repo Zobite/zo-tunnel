@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
-use zobite_tunnel_protocol::*;
+use zo_tunnel_protocol::*;
 
 /// Command sent to the yamux driver task.
 pub enum YamuxCmd {
@@ -143,7 +143,7 @@ impl TcpPortAllocator {
     }
 }
 
-/// Core Zobite Tunnel server.
+/// Core Zo Tunnel server.
 pub struct Server {
     config: ServerConfig,
 }
@@ -229,7 +229,7 @@ impl Server {
             }
         });
 
-        tracing::info!("✅ Zobite Tunnel Server ready!");
+        tracing::info!("✅ Zo Tunnel Server ready!");
 
         // ── Wait for shutdown ──
         tokio::select! {

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Zobite Tunnel Cross-Compile Build Script
+# Zo Tunnel Cross-Compile Build Script
 # Usage: ./scripts/build.sh [target]
 # Targets: linux-amd64, linux-arm64, macos-amd64, macos-arm64, all
 
@@ -30,12 +30,12 @@ build_target() {
         cargo build --release --target "$rust_target"
     fi
 
-    cp "$PROJECT_DIR/target/$rust_target/release/zobite-tunnel-server" "$dir/" 2>/dev/null || true
-    cp "$PROJECT_DIR/target/$rust_target/release/zobite-tunnel-client" "$dir/" 2>/dev/null || true
+    cp "$PROJECT_DIR/target/$rust_target/release/zo-tunnel-server" "$dir/" 2>/dev/null || true
+    cp "$PROJECT_DIR/target/$rust_target/release/zo-tunnel-client" "$dir/" 2>/dev/null || true
 
     # Create tarball
-    (cd "$OUT_DIR" && tar -czf "zobite-tunnel-$label.tar.gz" "$label/")
-    echo "✅ $label → $OUT_DIR/zobite-tunnel-$label.tar.gz"
+    (cd "$OUT_DIR" && tar -czf "zo-tunnel-$label.tar.gz" "$label/")
+    echo "✅ $label → $OUT_DIR/zo-tunnel-$label.tar.gz"
 }
 
 requested="${1:-all}"
@@ -48,7 +48,7 @@ if [ "$requested" = "all" ]; then
 elif [ "$requested" = "native" ]; then
     echo "🔨 Building native release..."
     cargo build --release
-    echo "✅ Binaries at target/release/zobite-tunnel-{server,client}"
+    echo "✅ Binaries at target/release/zo-tunnel-{server,client}"
 else
     for entry in "${TARGETS[@]}"; do
         IFS=':' read -r target label <<< "$entry"

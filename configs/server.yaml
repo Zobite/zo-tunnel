@@ -1,4 +1,4 @@
-# Zobite Tunnel Server Configuration
+# Zo Tunnel Server Configuration
 control_port: 7000
 public_port: 80
 dashboard_port: 9000

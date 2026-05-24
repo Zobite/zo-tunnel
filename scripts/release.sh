@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════════
-#  Zobite Tunnel — Release Script
+#  Zo Tunnel — Release Script
 #  Usage: ./scripts/release.sh
 #
 #  This script will:
@@ -47,7 +47,7 @@ fi
 
 # ── Get current version from first crate Cargo.toml ──
 get_current_version() {
-    grep -m1 '^version' "$PROJECT_DIR/crates/zobite-tunnel-server/Cargo.toml" \
+    grep -m1 '^version' "$PROJECT_DIR/crates/zo-tunnel-server/Cargo.toml" \
         | sed 's/version = "\(.*\)"/\1/'
 }
 
@@ -67,7 +67,7 @@ BUMP_MAJOR="$((MAJOR + 1)).0.0"
 # ── Display menu ──
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║     🚀 Zobite Tunnel — Release Tool      ║${NC}"
+echo -e "${BOLD}║     🚀 Zo Tunnel — Release Tool      ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  📦 Version hiện tại: ${CYAN}${BOLD}v${CURRENT_VERSION}${NC}"
@@ -119,9 +119,9 @@ echo ""
 #  Step 1: Update Cargo.toml versions
 # ═══════════════════════════════════════════════════════════════
 CARGO_FILES=(
-    "$PROJECT_DIR/crates/zobite-tunnel-protocol/Cargo.toml"
-    "$PROJECT_DIR/crates/zobite-tunnel-server/Cargo.toml"
-    "$PROJECT_DIR/crates/zobite-tunnel-client/Cargo.toml"
+    "$PROJECT_DIR/crates/zo-tunnel-protocol/Cargo.toml"
+    "$PROJECT_DIR/crates/zo-tunnel-server/Cargo.toml"
+    "$PROJECT_DIR/crates/zo-tunnel-client/Cargo.toml"
 )
 
 for file in "${CARGO_FILES[@]}"; do
@@ -136,10 +136,10 @@ done
 # ═══════════════════════════════════════════════════════════════
 #  Step 2: Update Homebrew formula
 # ═══════════════════════════════════════════════════════════════
-FORMULA="$PROJECT_DIR/Formula/zobite-tunnel.rb"
+FORMULA="$PROJECT_DIR/Formula/zo-tunnel.rb"
 if [[ -f "$FORMULA" ]]; then
     sed -i "s/version \"$CURRENT_VERSION\"/version \"$NEW_VERSION\"/" "$FORMULA"
-    ok "Cập nhật Formula/zobite-tunnel.rb → v${NEW_VERSION}"
+    ok "Cập nhật Formula/zo-tunnel.rb → v${NEW_VERSION}"
 fi
 
 # ═══════════════════════════════════════════════════════════════

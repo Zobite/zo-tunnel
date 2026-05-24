@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ```
-Internet  ───▶  VPS (zobite-tunnel-server)  ◀───tunnel───  Your Machine (zobite-tunnel-client)  ───▶  localhost:3000
+Internet  ───▶  VPS (zo-tunnel-server)  ◀───tunnel───  Your Machine (zo-tunnel-client)  ───▶  localhost:3000
 ```
 
 ---
@@ -34,7 +34,7 @@ Internet  ───▶  VPS (zobite-tunnel-server)  ◀───tunnel─── 
 
 ```
 ┌─────────────────┐          ┌──────────────────────────┐          ┌─────────────────┐
-│  Public User     │  HTTP    │     zobite-tunnel-server (VPS)   │  Tunnel  │  zobite-tunnel-client   │
+│  Public User     │  HTTP    │     zo-tunnel-server (VPS)   │  Tunnel  │  zo-tunnel-client   │
 │  (Browser/curl)  │────────▶│                          │◀─────────│  (Local Machine) │
 │                  │◀────────│  :8080 public HTTP proxy │─────────▶│                  │
 └─────────────────┘  Response│  :7000 control channel   │  yamux   │  localhost:3000  │
@@ -70,7 +70,7 @@ Sau khi chạy xong sẽ hiển thị **token** và **lệnh connect cho client*
 Hoặc cài với token tùy chọn:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/setup-server.sh | ZOBITE_TOKEN=my-secret sudo bash
+curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/setup-server.sh | ZO_TOKEN=my-secret sudo bash
 ```
 
 ### 2. Cài client trên máy local (macOS / Linux)
@@ -82,7 +82,7 @@ curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/instal
 ### 3. Kết nối
 
 ```bash
-zobite-tunnel-client \
+zo-tunnel-client \
   --server your-vps-ip:7000 \
   --local localhost:3000 \
   --id my-webapp \
@@ -103,13 +103,13 @@ open http://your-vps-ip:9000
 
 ```bash
 # Client A — web frontend (HTTP mode)
-zobite-tunnel-client --server vps:7000 --id webapp --local localhost:3000 --token secret
+zo-tunnel-client --server vps:7000 --id webapp --local localhost:3000 --token secret
 
 # Client B — API server (HTTP mode)
-zobite-tunnel-client --server vps:7000 --id api --local localhost:8000 --token secret
+zo-tunnel-client --server vps:7000 --id api --local localhost:8000 --token secret
 
 # Client C — SSH server (TCP mode — gets dedicated port)
-zobite-tunnel-client --server vps:7000 --id ssh --local localhost:22 --token secret --tcp
+zo-tunnel-client --server vps:7000 --id ssh --local localhost:22 --token secret --tcp
 
 # Access HTTP tunnels
 curl http://vps:8080/webapp/     # → localhost:3000 (Client A)
@@ -125,37 +125,37 @@ ssh user@vps -p 10000            # → localhost:22 (Client C)
 git clone https://github.com/Zobite/zo-tunnel.git
 cd zo-tunnel
 cargo build --release
-# → target/release/zobite-tunnel-server (5.5 MB)
-# → target/release/zobite-tunnel-client (1.8 MB)
+# → target/release/zo-tunnel-server (5.5 MB)
+# → target/release/zo-tunnel-client (1.8 MB)
 ```
 
 ---
 
 ## 📖 CLI Reference
 
-### `zobite-tunnel-server`
+### `zo-tunnel-server`
 
 | Flag | Default | Env Var | Description |
 |---|---|---|---|
-| `--config`, `-c` | — | `ZOBITE_CONFIG` | Path to YAML config file |
-| `--control-port` | `7000` | `ZOBITE_CONTROL_PORT` | Client control channel port |
-| `--public-port` | `8080` | `ZOBITE_PUBLIC_PORT` | Public HTTP proxy port |
-| `--dashboard-port` | `9000` | `ZOBITE_DASHBOARD_PORT` | Dashboard UI port |
-| `--token` | — | `ZOBITE_TOKEN` | Auth token(s), comma-separated |
-| `--routing-mode` | `path` | `ZOBITE_ROUTING_MODE` | `path` or `subdomain` |
-| `--domain` | — | `ZOBITE_DOMAIN` | Domain for subdomain routing |
-| `--tls-cert` | — | `ZOBITE_TLS_CERT` | TLS certificate file (PEM) |
-| `--tls-key` | — | `ZOBITE_TLS_KEY` | TLS private key file (PEM) |
+| `--config`, `-c` | — | `ZO_CONFIG` | Path to YAML config file |
+| `--control-port` | `7000` | `ZO_CONTROL_PORT` | Client control channel port |
+| `--public-port` | `8080` | `ZO_PUBLIC_PORT` | Public HTTP proxy port |
+| `--dashboard-port` | `9000` | `ZO_DASHBOARD_PORT` | Dashboard UI port |
+| `--token` | — | `ZO_TOKEN` | Auth token(s), comma-separated |
+| `--routing-mode` | `path` | `ZO_ROUTING_MODE` | `path` or `subdomain` |
+| `--domain` | — | `ZO_DOMAIN` | Domain for subdomain routing |
+| `--tls-cert` | — | `ZO_TLS_CERT` | TLS certificate file (PEM) |
+| `--tls-key` | — | `ZO_TLS_KEY` | TLS private key file (PEM) |
 
-### `zobite-tunnel-client`
+### `zo-tunnel-client`
 
 | Flag | Default | Env Var | Description |
 |---|---|---|---|
-| `--config`, `-c` | — | `ZOBITE_CONFIG` | Path to YAML config file |
-| `--server` | — | `ZOBITE_SERVER` | Server address (host:port) |
-| `--local` | `localhost:3000` | `ZOBITE_LOCAL` | Local service to forward to |
-| `--id` | `default` | `ZOBITE_CLIENT_ID` | Tunnel name (used for routing) |
-| `--token` | — | `ZOBITE_TOKEN` | Auth token |
+| `--config`, `-c` | — | `ZO_CONFIG` | Path to YAML config file |
+| `--server` | — | `ZO_SERVER` | Server address (host:port) |
+| `--local` | `localhost:3000` | `ZO_LOCAL` | Local service to forward to |
+| `--id` | `default` | `ZO_CLIENT_ID` | Tunnel name (used for routing) |
+| `--token` | — | `ZO_TOKEN` | Auth token |
 | `--tcp` | `false` | — | Request dedicated TCP port (raw TCP mode) |
 | `--no-reconnect` | `false` | — | Disable auto-reconnect |
 
@@ -264,7 +264,7 @@ Auto-refreshes every 2 seconds.
 ## 📁 Project Structure
 
 ```
-zobite_zobite-tunnel/
+zo-tunnel/
 ├── Cargo.toml                    # Workspace (3 crates)
 ├── PLAN.md                       # Implementation plan
 ├── README.md                     # This file
@@ -273,10 +273,10 @@ zobite_zobite-tunnel/
 ├── docker-compose.yaml           # Server deployment
 │
 ├── crates/
-│   ├── zobite-tunnel-protocol/           # Shared protocol library
+│   ├── zo-tunnel-protocol/           # Shared protocol library
 │   │   └── src/lib.rs            #   Message types, frame encoding, constants
 │   │
-│   ├── zobite-tunnel-server/             # Server binary
+│   ├── zo-tunnel-server/             # Server binary
 │   │   └── src/
 │   │       ├── main.rs           #   CLI + config loading
 │   │       ├── config.rs         #   YAML config with all options
@@ -286,7 +286,7 @@ zobite_zobite-tunnel/
 │   │       ├── dashboard.rs      #   Dashboard REST API (axum) + embedded UI
 │   │       └── metrics.rs        #   Metrics + rate limiter
 │   │
-│   └── zobite-tunnel-client/             # Client binary
+│   └── zo-tunnel-client/             # Client binary
 │       └── src/
 │           ├── main.rs           #   CLI + exponential backoff reconnect
 │           ├── config.rs         #   YAML config
@@ -321,8 +321,8 @@ zobite_zobite-tunnel/
 
 ```bash
 # Build images
-docker build -t zobite-tunnel-server --target server .
-docker build -t zobite-tunnel-client --target client .
+docker build -t zo-tunnel-server --target server .
+docker build -t zo-tunnel-client --target client .
 
 # Or use Docker Compose
 docker compose up -d

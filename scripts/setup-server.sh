@@ -2,16 +2,16 @@
 set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════════════
-#  Zobite Tunnel Server — One-line setup for Linux VPS
+#  Zo Tunnel Server — One-line setup for Linux VPS
 #
 #  Usage:
 #    curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/setup-server.sh | bash
 #
 #  With custom token:
-#    curl -sSL ... | ZOBITE_TOKEN=my-secret bash
+#    curl -sSL ... | ZO_TOKEN=my-secret bash
 #
 #  This script will:
-#    1. Download the latest zobite-tunnel-server binary
+#    1. Download the latest zo-tunnel-server binary
 #    2. Create a systemd service
 #    3. Open firewall ports
 #    4. Start the server
@@ -19,10 +19,10 @@ set -euo pipefail
 
 REPO="Zobite/zo-tunnel"
 INSTALL_DIR="/usr/local/bin"
-TOKEN="${ZOBITE_TOKEN:-$(openssl rand -hex 24)}"
-CONTROL_PORT="${ZOBITE_CONTROL_PORT:-7000}"
-PUBLIC_PORT="${ZOBITE_PUBLIC_PORT:-8080}"
-DASHBOARD_PORT="${ZOBITE_DASHBOARD_PORT:-9000}"
+TOKEN="${ZO_TOKEN:-$(openssl rand -hex 24)}"
+CONTROL_PORT="${ZO_CONTROL_PORT:-7000}"
+PUBLIC_PORT="${ZO_PUBLIC_PORT:-8080}"
+DASHBOARD_PORT="${ZO_DASHBOARD_PORT:-9000}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -38,7 +38,7 @@ fail()  { echo -e "${RED}❌${NC} $*"; exit 1; }
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║     Zobite Tunnel Server Setup               ║${NC}"
+echo -e "${CYAN}║     Zo Tunnel Server Setup               ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════╝${NC}"
 echo ""
 
@@ -63,7 +63,7 @@ LATEST=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" | grep
 LATEST="${LATEST:-v0.1.0}"
 info "Version: ${LATEST}"
 
-URL="https://github.com/${REPO}/releases/download/${LATEST}/zobite-tunnel-server-${LATEST}-${TARGET}.tar.gz"
+URL="https://github.com/${REPO}/releases/download/${LATEST}/zo-tunnel-server-${LATEST}-${TARGET}.tar.gz"
 info "Downloading ${URL}..."
 
 TMP_DIR=$(mktemp -d)
@@ -71,16 +71,16 @@ trap "rm -rf $TMP_DIR" EXIT
 
 curl -sSL "$URL" -o "$TMP_DIR/server.tar.gz"
 tar -xzf "$TMP_DIR/server.tar.gz" -C "$TMP_DIR"
-cp "$TMP_DIR/zobite-tunnel-server" "$INSTALL_DIR/zobite-tunnel-server"
-chmod +x "$INSTALL_DIR/zobite-tunnel-server"
-ok "Installed zobite-tunnel-server → ${INSTALL_DIR}"
+cp "$TMP_DIR/zo-tunnel-server" "$INSTALL_DIR/zo-tunnel-server"
+chmod +x "$INSTALL_DIR/zo-tunnel-server"
+ok "Installed zo-tunnel-server → ${INSTALL_DIR}"
 
 # ─── Create systemd service ───
 info "Creating systemd service..."
 
-cat > /etc/systemd/system/zobite-tunnel.service << EOF
+cat > /etc/systemd/system/zo-tunnel.service << EOF
 [Unit]
-Description=Zobite Tunnel Tunnel Server
+Description=Zo Tunnel Tunnel Server
 Documentation=https://github.com/${REPO}
 After=network-online.target
 Wants=network-online.target
@@ -89,7 +89,7 @@ Wants=network-online.target
 Type=simple
 User=nobody
 Group=nogroup
-ExecStart=${INSTALL_DIR}/zobite-tunnel-server \\
+ExecStart=${INSTALL_DIR}/zo-tunnel-server \\
   --control-port ${CONTROL_PORT} \\
   --public-port ${PUBLIC_PORT} \\
   --dashboard-port ${DASHBOARD_PORT} \\
@@ -135,14 +135,14 @@ else
 fi
 
 # ─── Start ───
-info "Starting Zobite Tunnel server..."
-systemctl enable --now zobite-tunnel
+info "Starting Zo Tunnel server..."
+systemctl enable --now zo-tunnel
 sleep 2
 
-if systemctl is-active --quiet zobite-tunnel; then
-    ok "Zobite Tunnel server is running!"
+if systemctl is-active --quiet zo-tunnel; then
+    ok "Zo Tunnel server is running!"
 else
-    warn "Service may not have started. Check: journalctl -u zobite-tunnel -f"
+    warn "Service may not have started. Check: journalctl -u zo-tunnel -f"
 fi
 
 # ─── Summary ───
@@ -150,7 +150,7 @@ VPS_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Zobite Tunnel Server is ready!${NC}"
+echo -e "${GREEN}  Zo Tunnel Server is ready!${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "  Server IP:    ${CYAN}${VPS_IP}${NC}"
@@ -164,20 +164,20 @@ echo "  Connect from your Mac/Linux:"
 echo ""
 echo -e "    ${CYAN}curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/install.sh | bash${NC}"
 echo ""
-echo -e "    ${CYAN}zobite-tunnel-client --server ${VPS_IP}:${CONTROL_PORT} \\${NC}"
+echo -e "    ${CYAN}zo-tunnel-client --server ${VPS_IP}:${CONTROL_PORT} \\${NC}"
 echo -e "    ${CYAN}  --local localhost:3000 --id my-app \\${NC}"
 echo -e "    ${CYAN}  --token ${TOKEN}${NC}"
 echo ""
 echo "  ─────────────────────────────────────────────────────"
 echo "  Management:"
 echo ""
-echo "    Status:   systemctl status zobite-tunnel"
-echo "    Logs:     journalctl -u zobite-tunnel -f"
-echo "    Restart:  systemctl restart zobite-tunnel"
-echo "    Stop:     systemctl stop zobite-tunnel"
+echo "    Status:   systemctl status zo-tunnel"
+echo "    Logs:     journalctl -u zo-tunnel -f"
+echo "    Restart:  systemctl restart zo-tunnel"
+echo "    Stop:     systemctl stop zo-tunnel"
 echo ""
 
 # ─── Save token to file for reference ───
-echo "${TOKEN}" > /etc/zobite-tunnel-token
-chmod 600 /etc/zobite-tunnel-token
-info "Token saved to /etc/zobite-tunnel-token"
+echo "${TOKEN}" > /etc/zo-tunnel-token
+chmod 600 /etc/zo-tunnel-token
+info "Token saved to /etc/zo-tunnel-token"
