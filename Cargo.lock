@@ -1711,7 +1711,7 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zobite-tunnel-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1730,7 +1730,7 @@ dependencies = [
 
 [[package]]
 name = "zobite-tunnel-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1743,7 +1743,7 @@ dependencies = [
 
 [[package]]
 name = "zobite-tunnel-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",

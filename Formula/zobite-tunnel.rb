@@ -7,7 +7,7 @@
 class ZobiteTunnel < Formula
   desc "Self-hosted tunnel — expose local services to the internet via your own VPS"
   homepage "https://github.com/Zobite/zo-tunnel"
-  version "0.1.0"
+  version "0.1.1"
   license "MIT"
 
   on_macos do
