@@ -47,3 +47,60 @@ impl ClientConfig {
         Ok(config)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client_config_yaml_parsing() {
+        let yaml = r#"
+server: "vps:6200"
+client_id: "my-app"
+local_addr: "localhost:3000"
+token: "secret123"
+"#;
+        let cfg: ClientConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.server, "vps:6200");
+        assert_eq!(cfg.client_id, "my-app");
+        assert_eq!(cfg.local_addr, "localhost:3000");
+        assert_eq!(cfg.token, "secret123");
+        assert!(!cfg.tcp_mode); // default false
+    }
+
+    #[test]
+    fn test_client_config_tcp_mode() {
+        let yaml = r#"
+server: "vps:6200"
+client_id: "db"
+local_addr: "localhost:5432"
+token: "tok"
+tcp_mode: true
+"#;
+        let cfg: ClientConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.tcp_mode);
+    }
+
+    #[test]
+    fn test_reconnect_defaults() {
+        let rc = ReconnectConfig::default();
+        assert!(rc.enabled);
+        assert_eq!(rc.max_interval, 30);
+    }
+
+    #[test]
+    fn test_client_config_custom_reconnect() {
+        let yaml = r#"
+server: "vps:6200"
+client_id: "app"
+local_addr: "localhost:8080"
+token: "t"
+reconnect:
+  enabled: false
+  max_interval: 60
+"#;
+        let cfg: ClientConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.reconnect.enabled);
+        assert_eq!(cfg.reconnect.max_interval, 60);
+    }
+}

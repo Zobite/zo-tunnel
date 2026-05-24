@@ -330,4 +330,93 @@ mod tests {
             panic!("Expected NewConn, got {:?}", received);
         }
     }
+
+    #[tokio::test]
+    async fn test_auth_res_with_none_fields() {
+        let (mut client, mut server) = duplex(1024);
+
+        let msg = Message::AuthRes(AuthRes {
+            success: false,
+            message: "denied".into(),
+            public_port: None,
+            assigned_route: None,
+            tcp_port: None,
+        });
+
+        write_message(&mut client, &msg).await.unwrap();
+        let received = read_message(&mut server).await.unwrap();
+
+        if let Message::AuthRes(res) = received {
+            assert!(!res.success);
+            assert_eq!(res.message, "denied");
+            assert!(res.public_port.is_none());
+            assert!(res.assigned_route.is_none());
+            assert!(res.tcp_port.is_none());
+        } else {
+            panic!("Expected AuthRes, got {:?}", received);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_auth_req_with_tcp_mode() {
+        let (mut client, mut server) = duplex(1024);
+
+        let msg = Message::AuthReq(AuthReq {
+            client_id: "db-tunnel".into(),
+            token: "tok".into(),
+            tcp_mode: true,
+        });
+
+        write_message(&mut client, &msg).await.unwrap();
+        let received = read_message(&mut server).await.unwrap();
+
+        if let Message::AuthReq(auth) = received {
+            assert_eq!(auth.client_id, "db-tunnel");
+            assert!(auth.tcp_mode);
+        } else {
+            panic!("Expected AuthReq, got {:?}", received);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_from_closed_connection() {
+        let (client, mut server) = duplex(1024);
+        drop(client); // close the writing end
+
+        let result = read_message(&mut server).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_large_client_id() {
+        let (mut client, mut server) = duplex(64 * 1024);
+
+        let long_id = "a".repeat(1000);
+        let msg = Message::AuthReq(AuthReq {
+            client_id: long_id.clone(),
+            token: "t".into(),
+            tcp_mode: false,
+        });
+
+        write_message(&mut client, &msg).await.unwrap();
+        let received = read_message(&mut server).await.unwrap();
+
+        if let Message::AuthReq(auth) = received {
+            assert_eq!(auth.client_id, long_id);
+        } else {
+            panic!("Expected AuthReq");
+        }
+    }
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(PROTOCOL_VERSION, 1);
+        assert_eq!(MAX_PAYLOAD_SIZE, 16 * 1024 * 1024);
+        assert_eq!(DEFAULT_CONTROL_PORT, 6200);
+        assert_eq!(DEFAULT_PUBLIC_PORT, 6210);
+        assert_eq!(DEFAULT_DASHBOARD_PORT, 6220);
+        assert_eq!(HEARTBEAT_INTERVAL_SECS, 10);
+        assert_eq!(HEARTBEAT_TIMEOUT_SECS, 35);
+    }
 }
+

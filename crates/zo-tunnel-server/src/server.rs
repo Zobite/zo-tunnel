@@ -632,3 +632,55 @@ impl Server {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TcpPortAllocator;
+
+    #[test]
+    fn test_allocator_basic() {
+        let alloc = TcpPortAllocator::new(5000, 5002);
+        assert_eq!(alloc.capacity(), 3);
+        assert_eq!(alloc.allocate(), Some(5000));
+        assert_eq!(alloc.allocate(), Some(5001));
+        assert_eq!(alloc.allocate(), Some(5002));
+    }
+
+    #[test]
+    fn test_allocator_exhaustion() {
+        let alloc = TcpPortAllocator::new(5000, 5001);
+        assert_eq!(alloc.allocate(), Some(5000));
+        assert_eq!(alloc.allocate(), Some(5001));
+        // All ports used
+        assert_eq!(alloc.allocate(), None);
+    }
+
+    #[test]
+    fn test_allocator_release_and_reuse() {
+        let alloc = TcpPortAllocator::new(5000, 5000); // single port
+        assert_eq!(alloc.capacity(), 1);
+
+        let port = alloc.allocate().unwrap();
+        assert_eq!(port, 5000);
+        assert_eq!(alloc.allocate(), None); // exhausted
+
+        alloc.release(port);
+        assert_eq!(alloc.allocate(), Some(5000)); // reusable
+    }
+
+    #[test]
+    fn test_allocator_release_untracked_port() {
+        let alloc = TcpPortAllocator::new(5000, 5002);
+        // Releasing a port that was never allocated is a no-op
+        alloc.release(9999);
+        assert_eq!(alloc.capacity(), 3);
+    }
+
+    #[test]
+    fn test_allocator_single_port_range() {
+        let alloc = TcpPortAllocator::new(8000, 8000);
+        assert_eq!(alloc.capacity(), 1);
+        assert_eq!(alloc.allocate(), Some(8000));
+        assert_eq!(alloc.allocate(), None);
+    }
+}
