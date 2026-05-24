@@ -20,6 +20,7 @@ set -euo pipefail
 REPO="Zobite/zo-tunnel"
 INSTALL_DIR="/usr/local/bin"
 TOKEN="${ZO_TOKEN:-$(openssl rand -hex 24)}"
+DASHBOARD_TOKEN="${ZO_DASHBOARD_TOKEN:-$(openssl rand -hex 16)}"
 CONTROL_PORT="${ZO_CONTROL_PORT:-6200}"
 PUBLIC_PORT="${ZO_PUBLIC_PORT:-6210}"
 DASHBOARD_PORT="${ZO_DASHBOARD_PORT:-6220}"
@@ -57,23 +58,77 @@ esac
 
 info "Platform: Linux ${ARCH} → ${TARGET}"
 
-# ─── Download latest binary ───
+# ─── Install binary (download or build from source) ───
+INSTALLED=false
+
+# Try downloading pre-built binary from GitHub releases
 info "Finding latest release..."
-LATEST=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed 's/.*"tag_name": "\(.*\)".*/\1/' | head -1)
-LATEST="${LATEST:-v0.1.0}"
-info "Version: ${LATEST}"
+LATEST=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | sed 's/.*"tag_name": "\(.*\)".*/\1/' | head -1 || true)
+LATEST="${LATEST:-}"
 
-URL="https://github.com/${REPO}/releases/download/${LATEST}/zo-tunnel-server-${LATEST}-${TARGET}.tar.gz"
-info "Downloading ${URL}..."
+if [ -n "$LATEST" ]; then
+    URL="https://github.com/${REPO}/releases/download/${LATEST}/zo-tunnel-server-${LATEST}-${TARGET}.tar.gz"
+    info "Trying to download ${LATEST} from GitHub releases..."
 
-TMP_DIR=$(mktemp -d)
-trap "rm -rf $TMP_DIR" EXIT
+    TMP_DIR=$(mktemp -d)
+    trap "rm -rf $TMP_DIR" EXIT
 
-curl -sSL "$URL" -o "$TMP_DIR/server.tar.gz"
-tar -xzf "$TMP_DIR/server.tar.gz" -C "$TMP_DIR"
-cp "$TMP_DIR/zo-tunnel-server" "$INSTALL_DIR/zo-tunnel-server"
-chmod +x "$INSTALL_DIR/zo-tunnel-server"
-ok "Installed zo-tunnel-server → ${INSTALL_DIR}"
+    if curl -fsSL "$URL" -o "$TMP_DIR/server.tar.gz" 2>/dev/null; then
+        if tar -xzf "$TMP_DIR/server.tar.gz" -C "$TMP_DIR" 2>/dev/null; then
+            if [ -f "$TMP_DIR/zo-tunnel-server" ]; then
+                cp "$TMP_DIR/zo-tunnel-server" "$INSTALL_DIR/zo-tunnel-server"
+                chmod +x "$INSTALL_DIR/zo-tunnel-server"
+                INSTALLED=true
+                ok "Installed zo-tunnel-server ${LATEST} → ${INSTALL_DIR}"
+            fi
+        fi
+    fi
+fi
+
+# Fallback: build from source
+if [ "$INSTALLED" = false ]; then
+    warn "No pre-built binary available — building from source..."
+
+    # Check if we're in the repo directory or can find it
+    REPO_DIR=""
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+    SCRIPT_PARENT="$(dirname "$SCRIPT_DIR")"
+
+    if [ -f "Cargo.toml" ] && grep -q "zo-tunnel-server" "Cargo.toml" 2>/dev/null; then
+        REPO_DIR="$(pwd)"
+    elif [ -f "$SCRIPT_PARENT/Cargo.toml" ] && grep -q "zo-tunnel-server" "$SCRIPT_PARENT/Cargo.toml" 2>/dev/null; then
+        REPO_DIR="$SCRIPT_PARENT"
+    else
+        # Need to clone
+        if ! command -v git &>/dev/null; then
+            fail "git is required to clone the repository. Install it first: apt install git"
+        fi
+        TMP_DIR="${TMP_DIR:-$(mktemp -d)}"
+        trap "rm -rf $TMP_DIR" EXIT
+        info "Cloning repository..."
+        git clone --depth 1 "https://github.com/${REPO}.git" "$TMP_DIR/zo-tunnel"
+        REPO_DIR="$TMP_DIR/zo-tunnel"
+    fi
+
+    # Check for cargo/rustc
+    if ! command -v cargo &>/dev/null; then
+        info "Rust not found — installing via rustup..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env"
+    fi
+
+    info "Building zo-tunnel-server (this may take a few minutes)..."
+    cargo build --release -p zo-tunnel-server --manifest-path "$REPO_DIR/Cargo.toml"
+
+    BINARY="$REPO_DIR/target/release/zo-tunnel-server"
+    if [ ! -f "$BINARY" ]; then
+        fail "Build failed — binary not found at $BINARY"
+    fi
+
+    cp "$BINARY" "$INSTALL_DIR/zo-tunnel-server"
+    chmod +x "$INSTALL_DIR/zo-tunnel-server"
+    ok "Built and installed zo-tunnel-server → ${INSTALL_DIR}"
+fi
 
 # ─── Create systemd service ───
 info "Creating systemd service..."
@@ -93,7 +148,8 @@ ExecStart=${INSTALL_DIR}/zo-tunnel-server \\
   --control-port ${CONTROL_PORT} \\
   --public-port ${PUBLIC_PORT} \\
   --dashboard-port ${DASHBOARD_PORT} \\
-  --token ${TOKEN}
+  --token ${TOKEN} \\
+  --dashboard-token ${DASHBOARD_TOKEN}
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info
@@ -158,14 +214,15 @@ echo -e "  Control:      ${CYAN}:${CONTROL_PORT}${NC}"
 echo -e "  Public HTTP:  ${CYAN}:${PUBLIC_PORT}${NC}"
 echo -e "  Dashboard:    ${CYAN}http://${VPS_IP}:${DASHBOARD_PORT}${NC}"
 echo -e "  Auth Token:   ${YELLOW}${TOKEN}${NC}"
+echo -e "  Admin Token:  ${YELLOW}${DASHBOARD_TOKEN}${NC}  ← for dashboard login"
 echo ""
 echo "  ─────────────────────────────────────────────────────"
 echo "  Connect from your Mac/Linux:"
 echo ""
 echo -e "    ${CYAN}curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/install.sh | bash${NC}"
 echo ""
-echo -e "    ${CYAN}zo-tunnel-client --server ${VPS_IP}:${CONTROL_PORT} \\${NC}"
-echo -e "    ${CYAN}  --local localhost:3000 --id my-app \\${NC}"
+echo -e "    ${CYAN}zo-tunnel-client --server ${VPS_IP}:${CONTROL_PORT}${NC} \\"
+echo -e "    ${CYAN}  --local localhost:3000 --id my-app${NC} \\"
 echo -e "    ${CYAN}  --token ${TOKEN}${NC}"
 echo ""
 echo "  ─────────────────────────────────────────────────────"
@@ -177,7 +234,10 @@ echo "    Restart:  systemctl restart zo-tunnel"
 echo "    Stop:     systemctl stop zo-tunnel"
 echo ""
 
-# ─── Save token to file for reference ───
+# ─── Save tokens to files for reference ───
 echo "${TOKEN}" > /etc/zo-tunnel-token
 chmod 600 /etc/zo-tunnel-token
-info "Token saved to /etc/zo-tunnel-token"
+echo "${DASHBOARD_TOKEN}" > /etc/zo-tunnel-dashboard-token
+chmod 600 /etc/zo-tunnel-dashboard-token
+info "Tunnel token saved to /etc/zo-tunnel-token"
+info "Dashboard token saved to /etc/zo-tunnel-dashboard-token"

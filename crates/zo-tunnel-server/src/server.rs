@@ -212,7 +212,18 @@ impl Server {
         let dash_state = DashboardState {
             registry: registry.clone(),
             metrics: metrics.clone(),
+            dashboard_token: self.config.dashboard_auth.token.clone(),
+            auth_enabled: self.config.dashboard_auth_enabled(),
+            tls_enabled: self.config.tls.enabled,
+            sessions: Arc::new(dashboard::SessionStore::new(
+                self.config.dashboard_auth.session_ttl_secs,
+            )),
         };
+        if dash_state.auth_enabled {
+            tracing::info!("🔒 Dashboard authentication enabled");
+        } else {
+            tracing::warn!("⚠️  Dashboard authentication disabled — dashboard is open to anyone");
+        }
         let mut dashboard_task = tokio::spawn(async move {
             let app = dashboard::create_router(dash_state);
             if let Err(e) = axum::serve(dashboard_listener, app).await {

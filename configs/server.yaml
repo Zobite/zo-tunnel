@@ -15,6 +15,13 @@ auth:
     - "token_abc123"
     - "token_xyz789"
 
+# Dashboard admin authentication
+# If token is set, the dashboard requires login with this token.
+# If token is empty or omitted, the dashboard is open (no auth).
+dashboard_auth:
+  token: ""                     # Set a token to protect your dashboard
+  session_ttl_secs: 86400       # Session duration: 24 hours
+
 rate_limit:
   requests_per_second: 100
   max_connections_per_client: 50

@@ -1,6 +1,9 @@
-// Zo Tunnel Dashboard — auto-refreshing client
+// Zo Tunnel Dashboard — auto-refreshing client with authentication
 
 const REFRESH_MS = 2000;
+let refreshInterval = null;
+
+// ─── Utilities ──────────────────────────────────────────────────
 
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
@@ -22,11 +25,117 @@ function formatNumber(n) {
     return n.toLocaleString();
 }
 
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 async function fetchJSON(url) {
     const resp = await fetch(url);
+    if (resp.status === 401) {
+        // Session expired or invalid
+        showLogin();
+        throw new Error('Unauthorized');
+    }
     if (!resp.ok) throw new Error(resp.statusText);
     return resp.json();
 }
+
+// ─── Auth Flow ──────────────────────────────────────────────────
+
+function showLogin() {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('dashboard').style.display = 'none';
+    if (refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    }
+}
+
+function showDashboard() {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    // Start auto-refresh
+    refresh();
+    if (refreshInterval) clearInterval(refreshInterval);
+    refreshInterval = setInterval(refresh, REFRESH_MS);
+}
+
+async function checkAuth() {
+    try {
+        const resp = await fetch('/api/auth/check');
+        const data = await resp.json();
+
+        // Handle TLS warning
+        const tlsWarning = document.getElementById('tls-warning');
+        if (data.tls_enabled) {
+            tlsWarning.style.display = 'none';
+        } else {
+            tlsWarning.style.display = 'block';
+        }
+
+        if (!data.auth_required || data.authenticated) {
+            showDashboard();
+        } else {
+            showLogin();
+        }
+    } catch (e) {
+        // Can't reach server — show login anyway
+        showLogin();
+    }
+}
+
+async function handleLogin(event) {
+    event.preventDefault();
+
+    const tokenInput = document.getElementById('admin-token');
+    const errorEl = document.getElementById('login-error');
+    const btnEl = document.getElementById('login-btn');
+
+    const token = tokenInput.value.trim();
+    if (!token) {
+        errorEl.textContent = 'Please enter your admin token';
+        return;
+    }
+
+    btnEl.disabled = true;
+    btnEl.textContent = 'Signing in...';
+    errorEl.textContent = '';
+
+    try {
+        const resp = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token }),
+        });
+
+        const data = await resp.json();
+
+        if (data.success) {
+            tokenInput.value = '';
+            showDashboard();
+        } else {
+            errorEl.textContent = data.message || 'Login failed';
+        }
+    } catch (e) {
+        errorEl.textContent = 'Connection error. Please try again.';
+    } finally {
+        btnEl.disabled = false;
+        btnEl.textContent = 'Sign In';
+    }
+}
+
+async function handleLogout() {
+    try {
+        await fetch('/api/logout', { method: 'POST' });
+    } catch (e) {
+        // Ignore errors on logout
+    }
+    showLogin();
+}
+
+// ─── Dashboard Refresh ──────────────────────────────────────────
 
 async function refresh() {
     try {
@@ -54,37 +163,82 @@ async function refresh() {
         document.getElementById('stat-failed-auth').textContent = metrics.failed_auth;
         document.getElementById('stat-rate-limited').textContent = metrics.rate_limited;
 
-        // Clients table
+        // Clients table — using safe DOM methods
         const tbody = document.getElementById('clients-body');
+        tbody.replaceChildren(); // clear safely
+
         if (clients.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="empty">No clients connected</td></tr>';
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 7;
+            td.className = 'empty';
+            td.textContent = 'No clients connected';
+            tr.appendChild(td);
+            tbody.appendChild(tr);
         } else {
-            tbody.innerHTML = clients.map(c => `
-                <tr>
-                    <td class="client-id">${escapeHtml(c.client_id)}</td>
-                    <td>${c.tcp_port ? '<span style="color:var(--orange)">TCP:' + c.tcp_port + '</span>' : '<span style="color:var(--green)">HTTP</span>'}</td>
-                    <td>${formatDuration(c.connected_at_secs)} ago</td>
-                    <td>${formatNumber(c.total_requests)}</td>
-                    <td>${c.active_streams}</td>
-                    <td>${formatBytes(c.bytes_in)}</td>
-                    <td>${formatBytes(c.bytes_out)}</td>
-                </tr>
-            `).join('');
+            clients.forEach(function (c) {
+                const tr = document.createElement('tr');
+
+                // Client ID
+                const tdId = document.createElement('td');
+                tdId.className = 'client-id';
+                tdId.textContent = c.client_id;
+                tr.appendChild(tdId);
+
+                // Mode
+                const tdMode = document.createElement('td');
+                const modeSpan = document.createElement('span');
+                if (c.tcp_port) {
+                    modeSpan.style.color = 'var(--orange)';
+                    modeSpan.textContent = 'TCP:' + c.tcp_port;
+                } else {
+                    modeSpan.style.color = 'var(--green)';
+                    modeSpan.textContent = 'HTTP';
+                }
+                tdMode.appendChild(modeSpan);
+                tr.appendChild(tdMode);
+
+                // Connected
+                const tdConn = document.createElement('td');
+                tdConn.textContent = formatDuration(c.connected_at_secs) + ' ago';
+                tr.appendChild(tdConn);
+
+                // Requests
+                const tdReq = document.createElement('td');
+                tdReq.textContent = formatNumber(c.total_requests);
+                tr.appendChild(tdReq);
+
+                // Active
+                const tdActive = document.createElement('td');
+                tdActive.textContent = c.active_streams;
+                tr.appendChild(tdActive);
+
+                // Data In
+                const tdIn = document.createElement('td');
+                tdIn.textContent = formatBytes(c.bytes_in);
+                tr.appendChild(tdIn);
+
+                // Data Out
+                const tdOut = document.createElement('td');
+                tdOut.textContent = formatBytes(c.bytes_out);
+                tr.appendChild(tdOut);
+
+                tbody.appendChild(tr);
+            });
         }
 
     } catch (e) {
+        if (e.message === 'Unauthorized') return; // Already handled
         const badge = document.getElementById('status-badge');
         badge.textContent = 'offline';
         badge.className = 'badge offline';
     }
 }
 
-function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
+// ─── Init ───────────────────────────────────────────────────────
 
-// Initial load + interval
-refresh();
-setInterval(refresh, REFRESH_MS);
+document.getElementById('login-form').addEventListener('submit', handleLogin);
+document.getElementById('logout-btn').addEventListener('click', handleLogout);
+
+// Check auth on page load
+checkAuth();

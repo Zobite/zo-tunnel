@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use subtle::ConstantTimeEq;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -25,6 +26,9 @@ pub struct ServerConfig {
 
     #[serde(default)]
     pub auth: AuthConfig,
+
+    #[serde(default)]
+    pub dashboard_auth: DashboardAuthConfig,
 
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
@@ -60,6 +64,26 @@ pub struct TlsConfig {
 pub struct AuthConfig {
     #[serde(default)]
     pub tokens: Vec<String>,
+}
+
+/// Dashboard authentication configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardAuthConfig {
+    /// Token required to access the dashboard. If empty, dashboard is open.
+    #[serde(default)]
+    pub token: String,
+    /// Session cookie TTL in seconds (default: 24 hours).
+    #[serde(default = "default_session_ttl")]
+    pub session_ttl_secs: u64,
+}
+
+impl Default for DashboardAuthConfig {
+    fn default() -> Self {
+        Self {
+            token: String::new(),
+            session_ttl_secs: default_session_ttl(),
+        }
+    }
 }
 
 
@@ -128,6 +152,9 @@ fn default_rps() -> u32 {
 fn default_max_conn() -> u32 {
     50
 }
+fn default_session_ttl() -> u64 {
+    86400 // 24 hours
+}
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -139,6 +166,7 @@ impl Default for ServerConfig {
             domain: None,
             tls: TlsConfig::default(),
             auth: AuthConfig::default(),
+            dashboard_auth: DashboardAuthConfig::default(),
             rate_limit: RateLimitConfig::default(),
             tcp_ports: TcpPortConfig::default(),
             log_level: default_log_level(),
@@ -161,6 +189,22 @@ impl ServerConfig {
         }
         self.auth.tokens.iter().any(|t| t == token)
     }
+
+    /// Check if the dashboard requires authentication.
+    pub fn dashboard_auth_enabled(&self) -> bool {
+        !self.dashboard_auth.token.is_empty()
+    }
+
+    /// Validate a dashboard token using constant-time comparison.
+    pub fn validate_dashboard_token(&self, token: &str) -> bool {
+        if !self.dashboard_auth_enabled() {
+            return true; // no auth configured → open access
+        }
+        let expected = self.dashboard_auth.token.as_bytes();
+        let provided = token.as_bytes();
+        // Constant-time comparison to prevent timing attacks
+        expected.len() == provided.len() && expected.ct_eq(provided).into()
+    }
 }
 
 #[cfg(test)]
@@ -176,6 +220,8 @@ mod tests {
         assert_eq!(cfg.routing_mode, RoutingMode::Path);
         assert!(!cfg.tls.enabled);
         assert!(cfg.auth.tokens.is_empty());
+        assert!(cfg.dashboard_auth.token.is_empty());
+        assert_eq!(cfg.dashboard_auth.session_ttl_secs, 86400);
     }
 
     #[test]
@@ -230,5 +276,38 @@ auth:
         assert!(cfg.enabled);
         assert_eq!(cfg.port_start, 10000);
         assert_eq!(cfg.port_end, 10100);
+    }
+
+    #[test]
+    fn test_dashboard_auth_disabled_by_default() {
+        let cfg = ServerConfig::default();
+        assert!(!cfg.dashboard_auth_enabled());
+        // When no token is configured, all tokens are accepted
+        assert!(cfg.validate_dashboard_token("anything"));
+    }
+
+    #[test]
+    fn test_dashboard_auth_validates_token() {
+        let mut cfg = ServerConfig::default();
+        cfg.dashboard_auth.token = "super-secret-admin".into();
+        assert!(cfg.dashboard_auth_enabled());
+        assert!(cfg.validate_dashboard_token("super-secret-admin"));
+        assert!(!cfg.validate_dashboard_token("wrong-token"));
+        assert!(!cfg.validate_dashboard_token(""));
+        // Different length should also fail
+        assert!(!cfg.validate_dashboard_token("super-secret-admin-extra"));
+        assert!(!cfg.validate_dashboard_token("super"));
+    }
+
+    #[test]
+    fn test_dashboard_auth_yaml_parsing() {
+        let yaml = r#"
+dashboard_auth:
+  token: "my-admin-token"
+  session_ttl_secs: 3600
+"#;
+        let cfg: ServerConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.dashboard_auth.token, "my-admin-token");
+        assert_eq!(cfg.dashboard_auth.session_ttl_secs, 3600);
     }
 }

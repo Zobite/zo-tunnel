@@ -48,6 +48,14 @@ struct Cli {
     /// TLS private key file
     #[arg(long, env = "ZO_TLS_KEY")]
     tls_key: Option<String>,
+
+    /// Dashboard admin token (if set, dashboard requires authentication)
+    #[arg(long, env = "ZO_DASHBOARD_TOKEN")]
+    dashboard_token: Option<String>,
+
+    /// Dashboard session TTL in seconds (default: 86400 = 24h)
+    #[arg(long, env = "ZO_SESSION_TTL")]
+    session_ttl: Option<u64>,
 }
 
 #[tokio::main]
@@ -97,6 +105,12 @@ async fn main() -> Result<()> {
     }
     if let Some(ref key) = cli.tls_key {
         cfg.tls.key = key.clone();
+    }
+    if let Some(ref dt) = cli.dashboard_token {
+        cfg.dashboard_auth.token = dt.clone();
+    }
+    if let Some(ttl) = cli.session_ttl {
+        cfg.dashboard_auth.session_ttl_secs = ttl;
     }
 
     tracing::info!("╔══════════════════════════════════════╗");

@@ -8,7 +8,36 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="app">
+    <!-- Login Screen -->
+    <div class="login-overlay" id="login-screen">
+        <div class="login-card">
+            <div class="login-logo">🚀 Zo Tunnel</div>
+            <div class="login-subtitle">Admin Dashboard</div>
+            <div class="login-warning" id="tls-warning">
+                ⚠️ Connection is not encrypted. Use TLS or SSH tunnel in production.
+            </div>
+            <form id="login-form" autocomplete="off">
+                <div class="login-field">
+                    <label class="login-label" for="admin-token">Admin Token</label>
+                    <input
+                        type="password"
+                        id="admin-token"
+                        class="login-input"
+                        placeholder="Enter your dashboard admin token"
+                        required
+                        autocomplete="off"
+                    >
+                </div>
+                <div class="login-error" id="login-error"></div>
+                <button type="submit" class="login-btn" id="login-btn">
+                    Sign In
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dashboard (hidden until authenticated) -->
+    <div class="app" id="dashboard" style="display: none;">
         <header class="header">
             <div class="header-left">
                 <div class="logo">🚀 Zo Tunnel</div>
@@ -16,6 +45,7 @@
             </div>
             <div class="header-right">
                 <span class="uptime" id="uptime">—</span>
+                <button class="logout-btn" id="logout-btn" title="Sign out">🔒 Logout</button>
             </div>
         </header>
 
