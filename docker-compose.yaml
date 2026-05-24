@@ -3,7 +3,7 @@
 
 services:
   zobite-tunnel-server:
-    image: ghcr.io/devlangla/zobite-tunnel-server:latest
+    image: ghcr.io/zobite/zo-tunnel-server:latest
     # Or build locally:
     # build:
     #   context: .

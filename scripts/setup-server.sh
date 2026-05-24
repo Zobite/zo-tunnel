@@ -5,7 +5,7 @@ set -euo pipefail
 #  Zobite Tunnel Server — One-line setup for Linux VPS
 #
 #  Usage:
-#    curl -sSL https://raw.githubusercontent.com/devlangla/zobite-tunnel/main/scripts/setup-server.sh | bash
+#    curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/setup-server.sh | bash
 #
 #  With custom token:
 #    curl -sSL ... | ZOBITE_TOKEN=my-secret bash
@@ -17,7 +17,7 @@ set -euo pipefail
 #    4. Start the server
 # ═══════════════════════════════════════════════════════════════════
 
-REPO="devlangla/zobite-tunnel"
+REPO="Zobite/zo-tunnel"
 INSTALL_DIR="/usr/local/bin"
 TOKEN="${ZOBITE_TOKEN:-$(openssl rand -hex 24)}"
 CONTROL_PORT="${ZOBITE_CONTROL_PORT:-7000}"
@@ -162,7 +162,7 @@ echo ""
 echo "  ─────────────────────────────────────────────────────"
 echo "  Connect from your Mac:"
 echo ""
-echo -e "    ${CYAN}brew tap devlangla/tap && brew install zobite-tunnel${NC}"
+echo -e "    ${CYAN}brew tap Zobite/tap && brew install zobite-tunnel${NC}"
 echo ""
 echo -e "    ${CYAN}zobite-tunnel-client --server ${VPS_IP}:${CONTROL_PORT} \\${NC}"
 echo -e "    ${CYAN}  --local localhost:3000 --id my-app \\${NC}"

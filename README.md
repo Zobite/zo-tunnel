@@ -70,7 +70,7 @@ Internet  ───▶  VPS (zobite-tunnel-server)  ◀───tunnel─── 
 ### Build
 
 ```bash
-git clone https://github.com/devlangla/zobite-tunnel.git
+git clone https://github.com/Zobite/zo-tunnel.git
 cd zobite-tunnel
 cargo build --release
 

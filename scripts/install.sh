@@ -5,12 +5,12 @@ set -euo pipefail
 #  Zobite Tunnel Installer
 #  Install server or client with one command:
 #
-#  Server: curl -sSL https://raw.githubusercontent.com/devlangla/zobite-tunnel/main/scripts/install.sh | bash -s server
-#  Client: curl -sSL https://raw.githubusercontent.com/devlangla/zobite-tunnel/main/scripts/install.sh | bash -s client
-#  Both:   curl -sSL https://raw.githubusercontent.com/devlangla/zobite-tunnel/main/scripts/install.sh | bash -s all
+#  Server: curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/install.sh | bash -s server
+#  Client: curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/install.sh | bash -s client
+#  Both:   curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/install.sh | bash -s all
 # ═══════════════════════════════════════════════════════════════════
 
-REPO="devlangla/zobite-tunnel"
+REPO="Zobite/zo-tunnel"
 INSTALL_DIR="/usr/local/bin"
 COMPONENT="${1:-client}"   # client, server, or all
 
