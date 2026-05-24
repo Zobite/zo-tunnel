@@ -12,11 +12,10 @@ set -euo pipefail
 #    3. Update version trong tất cả Cargo.toml
 #    4. Build binaries cho linux-amd64 + linux-arm64
 #    5. Git commit + tag + push
-#    6. Tạo GitHub Release + upload binaries
+#    6. Tạo GitHub Release + upload binaries (dùng gh CLI)
 #
 #  Yêu cầu:
-#    - GITHUB_TOKEN env var (hoặc file /etc/zo-tunnel-github-token)
-#      → https://github.com/settings/tokens (scope: repo)
+#    - gh CLI đã auth (gh auth login)
 #    - gcc-aarch64-linux-gnu (tự cài nếu thiếu)
 # ═══════════════════════════════════════════════════════════════
 
@@ -55,14 +54,9 @@ cd "$PROJECT_DIR"
 # Git check
 git rev-parse --is-inside-work-tree &>/dev/null || fail "Not a git repo"
 
-# GitHub token
-if [ -z "${GITHUB_TOKEN:-}" ]; then
-    if [ -f /etc/zo-tunnel-github-token ]; then
-        GITHUB_TOKEN=$(cat /etc/zo-tunnel-github-token)
-    else
-        fail "GITHUB_TOKEN not set. Export it or save to /etc/zo-tunnel-github-token"
-    fi
-fi
+# gh CLI check
+command -v gh &>/dev/null || fail "gh CLI not installed. Run: apt install gh && gh auth login"
+gh auth status &>/dev/null || fail "gh not authenticated. Run: gh auth login"
 
 # ARM64 cross-compiler
 if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
@@ -209,11 +203,11 @@ git push origin "$(git branch --show-current)" --follow-tags
 ok "Pushed ${TAG}"
 
 # ═══════════════════════════════════════════════════════════════
-#  Step 5: Create GitHub Release
+#  Step 5+6: Create GitHub Release + Upload
 # ═══════════════════════════════════════════════════════════════
-header "Step 5/6 — GitHub Release"
+header "Step 5/6 — GitHub Release + Upload"
 
-RELEASE_BODY="## Install
+RELEASE_NOTES="## Install
 
 **Server (Linux VPS):**
 \`\`\`bash
@@ -225,45 +219,12 @@ curl -sSL https://raw.githubusercontent.com/${REPO}/main/scripts/setup-server.sh
 curl -sSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | bash
 \`\`\`"
 
-RELEASE_RESPONSE=$(curl -sSL -X POST \
-    -H "Authorization: token $GITHUB_TOKEN" \
-    -H "Content-Type: application/json" \
-    "https://api.github.com/repos/${REPO}/releases" \
-    -d "$(jq -n \
-        --arg tag "$TAG" \
-        --arg name "$TAG" \
-        --arg body "$RELEASE_BODY" \
-        '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false}')")
+gh release create "$TAG" "${BUILT_FILES[@]}" \
+    --repo "$REPO" \
+    --title "$TAG" \
+    --notes "$RELEASE_NOTES"
 
-RELEASE_ID=$(echo "$RELEASE_RESPONSE" | grep '"id"' | head -1 | grep -o '[0-9]*')
-[ -z "$RELEASE_ID" ] && { echo "$RELEASE_RESPONSE"; fail "Failed to create release"; }
-ok "Release created"
-
-# ═══════════════════════════════════════════════════════════════
-#  Step 6: Upload Assets
-# ═══════════════════════════════════════════════════════════════
-header "Step 6/6 — Upload Binaries"
-
-UPLOAD_URL="https://uploads.github.com/repos/${REPO}/releases/${RELEASE_ID}/assets"
-
-for file in "${BUILT_FILES[@]}"; do
-    FILENAME=$(basename "$file")
-    CONTENT_TYPE="application/gzip"
-    [ "$FILENAME" = "SHA256SUMS.txt" ] && CONTENT_TYPE="text/plain"
-
-    info "Uploading ${FILENAME}..."
-    RESP=$(curl -sSL -X POST \
-        -H "Authorization: token $GITHUB_TOKEN" \
-        -H "Content-Type: $CONTENT_TYPE" \
-        "${UPLOAD_URL}?name=${FILENAME}" \
-        --data-binary "@$file")
-
-    if echo "$RESP" | grep -q '"state": "uploaded"'; then
-        ok "$FILENAME"
-    else
-        warn "Upload may have failed: $FILENAME"
-    fi
-done
+ok "Release created + binaries uploaded"
 
 # ═══════════════════════════════════════════════════════════════
 #  Done!
