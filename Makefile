@@ -25,13 +25,13 @@ test-e2e: build-all
 
 run-server:
 	RUST_LOG=info cargo run -p zo-tunnel-server -- \
-		--control-port 7000 \
-		--public-port 8080 \
-		--dashboard-port 9000
+		--control-port 6200 \
+		--public-port 6210 \
+		--dashboard-port 6220
 
 run-client:
 	RUST_LOG=info cargo run -p zo-tunnel-client -- \
-		--server 127.0.0.1:7000 \
+		--server 127.0.0.1:6200 \
 		--local localhost:3000 \
 		--id my-app
 

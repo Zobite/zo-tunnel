@@ -20,13 +20,13 @@ pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_PAYLOAD_SIZE: u32 = 16 * 1024 * 1024;
 
 /// Default control port
-pub const DEFAULT_CONTROL_PORT: u16 = 7000;
+pub const DEFAULT_CONTROL_PORT: u16 = 6200;
 
 /// Default public port
-pub const DEFAULT_PUBLIC_PORT: u16 = 8080;
+pub const DEFAULT_PUBLIC_PORT: u16 = 6210;
 
 /// Default dashboard port
-pub const DEFAULT_DASHBOARD_PORT: u16 = 9000;
+pub const DEFAULT_DASHBOARD_PORT: u16 = 6220;
 
 /// Heartbeat interval in seconds
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
@@ -284,7 +284,7 @@ mod tests {
         let msg = Message::AuthRes(AuthRes {
             success: true,
             message: "OK".into(),
-            public_port: Some(8080),
+            public_port: Some(6210),
             assigned_route: Some("my-app".into()),
             tcp_port: Some(10001),
         });

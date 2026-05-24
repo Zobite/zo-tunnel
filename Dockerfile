@@ -30,12 +30,12 @@ COPY --from=builder /app/target/release/zo-tunnel-server /usr/local/bin/zo-tunne
 
 USER zo-tunnel
 
-EXPOSE 7000 8080 9000
+EXPOSE 6200 6210 6220
 # TCP tunnel port range
 EXPOSE 10000-10100
 
 ENTRYPOINT ["zo-tunnel-server"]
-CMD ["--control-port", "7000", "--public-port", "8080", "--dashboard-port", "9000"]
+CMD ["--control-port", "6200", "--public-port", "6210", "--dashboard-port", "6220"]
 
 # ── Stage 3: Client ──
 FROM debian:bookworm-slim AS client

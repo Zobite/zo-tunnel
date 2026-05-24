@@ -24,15 +24,15 @@
 │  Public User     │  HTTP    │     zo-tunnel-server (VPS)   │  Tunnel  │  zo-tunnel-client   │
 │  (Browser/curl)  │────────▶│                          │◀─────────│  (Local Machine) │
 │                  │◀────────│  :80 public listener     │─────────▶│                  │
-└─────────────────┘  Response│  :7000 control channel   │  Mux/TCP │  localhost:3000  │
-                             │  :9000 dashboard (opt)   │          └─────────────────┘
+└─────────────────┘  Response│  :6200 control channel   │  Mux/TCP │  localhost:3000  │
+                             │  :6220 dashboard (opt)   │          └─────────────────┘
                              └──────────────────────────┘
 ```
 
 ### Data Flow
 
 ```
-1. Client ──TCP/WebSocket──▶ Server:7000   (Register + keep-alive)
+1. Client ──TCP/WebSocket──▶ Server:6200   (Register + keep-alive)
 2. User   ──HTTP──────────▶ Server:80      (Public request)
 3. Server ──Tunnel─────────▶ Client        (Forward request bytes)
 4. Client ──HTTP───────────▶ localhost:X    (Proxy to local service)
@@ -125,7 +125,7 @@ Mỗi message truyền qua tunnel sẽ có dạng binary frame:
 ```
 Client                          Server
   │                                │
-  │──── TCP Connect ──────────────▶│  :7000
+  │──── TCP Connect ──────────────▶│  :6200
   │                                │
   │──── AUTH_REQ {token, id} ────▶│
   │                                │  Validate token
@@ -145,32 +145,32 @@ Client                          Server
 
 ### Phase 1 — TCP Tunnel Cơ Bản (1 Client, 1 Port)
 
-> **Mục tiêu:** Internet → VPS:8080 → Localhost:3000 hoạt động được.
+> **Mục tiêu:** Internet → VPS:6210 → Localhost:3000 hoạt động được.
 
 | # | Task | File liên quan |
 |---|---|---|
 | 1.1 | Khởi tạo Cargo workspace + 3 crates (`zo-tunnel-server`, `zo-tunnel-client`, `zo-tunnel-protocol`) | `Cargo.toml`, `crates/*/Cargo.toml` |
 | 1.2 | Định nghĩa message frame format (Version, Type, Length, Payload) — dùng `bytes` crate | `crates/zo-tunnel-protocol/src/lib.rs` |
 | 1.3 | Viết async reader/writer cho protocol — dùng `tokio::io::{AsyncReadExt, AsyncWriteExt}` | `crates/zo-tunnel-protocol/src/lib.rs` |
-| 1.4 | **Server**: Lắng nghe TCP port 7000 (Control Channel) với `TcpListener`, chờ Client connect | `crates/zo-tunnel-server/src/server.rs` |
-| 1.5 | **Client**: Connect TCP tới `vps:7000` với `TcpStream`, gửi AUTH_REQ đơn giản (hardcode token) | `crates/zo-tunnel-client/src/client.rs` |
-| 1.6 | **Server**: Lắng nghe TCP port 8080 (Public Port). Khi có connection mới → gửi `NEW_CONN` cho Client | `crates/zo-tunnel-server/src/tunnel.rs` |
+| 1.4 | **Server**: Lắng nghe TCP port 6200 (Control Channel) với `TcpListener`, chờ Client connect | `crates/zo-tunnel-server/src/server.rs` |
+| 1.5 | **Client**: Connect TCP tới `vps:6200` với `TcpStream`, gửi AUTH_REQ đơn giản (hardcode token) | `crates/zo-tunnel-client/src/client.rs` |
+| 1.6 | **Server**: Lắng nghe TCP port 6210 (Public Port). Khi có connection mới → gửi `NEW_CONN` cho Client | `crates/zo-tunnel-server/src/tunnel.rs` |
 | 1.7 | **Client**: Nhận `NEW_CONN` → mở TCP connection tới `localhost:3000` → `tokio::io::copy_bidirectional` | `crates/zo-tunnel-client/src/proxy.rs` |
 | 1.8 | **Pipe bidirectional**: Server pipe bytes giữa public connection ↔ tunnel stream | `crates/zo-tunnel-server/src/proxy.rs` |
 | 1.9 | Implement PING/PONG heartbeat (mỗi 10s) — dùng `tokio::time::interval` | `crates/zo-tunnel-protocol/src/lib.rs`, `crates/zo-tunnel-client/src/client.rs` |
 | 1.10 | Viết `main.rs` cho cả server và client (CLI flags với `clap` derive) | `crates/*/src/main.rs` |
-| 1.11 | **Test**: Chạy 1 HTTP server local → connect client → curl từ ngoài vào VPS:8080 | — |
+| 1.11 | **Test**: Chạy 1 HTTP server local → connect client → curl từ ngoài vào VPS:6210 | — |
 
 **Deliverable Phase 1:**
 ```bash
 # Trên VPS
-./zo-tunnel-server --control-port 7000 --public-port 8080
+./zo-tunnel-server --control-port 6200 --public-port 6210
 
 # Trên máy local  
-./zo-tunnel-client --server vps-ip:7000 --local localhost:3000 --token secret123
+./zo-tunnel-client --server vps-ip:6200 --local localhost:3000 --token secret123
 
 # Test: trên bất kỳ máy nào
-curl http://vps-ip:8080    # → thấy response từ localhost:3000
+curl http://vps-ip:6210    # → thấy response từ localhost:3000
 ```
 
 ---
@@ -193,10 +193,10 @@ curl http://vps-ip:8080    # → thấy response từ localhost:3000
 **Deliverable Phase 2:**
 ```bash
 # Client A
-./zo-tunnel-client --server vps:7000 --id webapp --local localhost:3000
+./zo-tunnel-client --server vps:6200 --id webapp --local localhost:3000
 
 # Client B  
-./zo-tunnel-client --server vps:7000 --id api --local localhost:8000
+./zo-tunnel-client --server vps:6200 --id api --local localhost:8000
 
 # Truy cập
 curl http://vps-ip/webapp/    # → localhost:3000 của máy A
@@ -241,9 +241,9 @@ curl http://vps-ip/api/       # → localhost:8000 của máy B
 
 ### server.yaml
 ```yaml
-control_port: 7000        # Port cho client kết nối
+control_port: 6200        # Port cho client kết nối
 public_port: 80           # Port cho user truy cập
-dashboard_port: 9000      # Port dashboard (optional)
+dashboard_port: 6220      # Port dashboard (optional)
 routing_mode: "path"      # "path" hoặc "subdomain"
 domain: ""                # Domain nếu dùng subdomain mode
 tls:
@@ -259,7 +259,7 @@ log_level: "info"
 
 ### client.yaml
 ```yaml
-server: "vps-ip:7000"
+server: "vps-ip:6200"
 client_id: "my-webapp"
 local_addr: "localhost:3000"
 token: "token_abc123"

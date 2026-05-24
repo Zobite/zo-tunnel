@@ -128,7 +128,7 @@ echo ""
 
 if [ "$COMPONENT" = "client" ] || [ "$COMPONENT" = "all" ]; then
     echo "  Client usage:"
-    echo "    zo-tunnel-client --server YOUR_VPS:7000 --local localhost:3000 --id app --token SECRET"
+    echo "    zo-tunnel-client --server YOUR_VPS:6200 --local localhost:3000 --id app --token SECRET"
     echo ""
 fi
 

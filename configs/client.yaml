@@ -1,5 +1,5 @@
 # Zo Tunnel Client Configuration
-server: "vps-ip:7000"
+server: "vps-ip:6200"
 client_id: "my-webapp"
 local_addr: "localhost:3000"
 token: "token_abc123"

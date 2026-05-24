@@ -36,18 +36,18 @@ Internet  ───▶  VPS (zo-tunnel-server)  ◀───tunnel───  You
 ┌─────────────────┐          ┌──────────────────────────┐          ┌─────────────────┐
 │  Public User     │  HTTP    │     zo-tunnel-server (VPS)   │  Tunnel  │  zo-tunnel-client   │
 │  (Browser/curl)  │────────▶│                          │◀─────────│  (Local Machine) │
-│                  │◀────────│  :8080 public HTTP proxy │─────────▶│                  │
-└─────────────────┘  Response│  :7000 control channel   │  yamux   │  localhost:3000  │
-                             │  :9000 dashboard         │  mux/TCP │                  │
+│                  │◀────────│  :6210 public HTTP proxy │─────────▶│                  │
+└─────────────────┘  Response│  :6200 control channel   │  yamux   │  localhost:3000  │
+                             │  :6220 dashboard         │  mux/TCP │                  │
                              └──────────────────────────┘          └─────────────────┘
 ```
 
 ### Data Flow
 
 ```
-1. Client  ──TCP──▶  Server:7000     (Connect + AUTH handshake)
+1. Client  ──TCP──▶  Server:6200     (Connect + AUTH handshake)
 2. Both sides upgrade to yamux multiplexed session
-3. User    ──HTTP──▶ Server:8080     (Public request: /client-id/path)
+3. User    ──HTTP──▶ Server:6210     (Public request: /client-id/path)
 4. Server extracts routing, opens yamux stream to target client
 5. hyper HTTP client sends request through yamux stream
 6. Client accepts yamux stream → pipes to localhost:3000
@@ -83,7 +83,7 @@ curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/instal
 
 ```bash
 zo-tunnel-client \
-  --server your-vps-ip:7000 \
+  --server your-vps-ip:6200 \
   --local localhost:3000 \
   --id my-webapp \
   --token my-secret-token
@@ -92,28 +92,29 @@ zo-tunnel-client \
 ### 4. Truy cập từ bất kỳ đâu
 
 ```bash
-curl http://your-vps-ip:8080/my-webapp/
+curl http://your-vps-ip:6210/my-webapp/
 # → Response from your localhost:3000 🎉
 
 # Dashboard
-open http://your-vps-ip:9000
+open http://your-vps-ip:6220
 ```
 
 ### Multi-Client Example
 
 ```bash
 # Client A — web frontend (HTTP mode)
-zo-tunnel-client --server vps:7000 --id webapp --local localhost:3000 --token secret
+# Client A — web frontend (HTTP mode)
+zo-tunnel-client --server vps:6200 --id webapp --local localhost:3000 --token secret
 
 # Client B — API server (HTTP mode)
-zo-tunnel-client --server vps:7000 --id api --local localhost:8000 --token secret
+zo-tunnel-client --server vps:6200 --id api --local localhost:8000 --token secret
 
 # Client C — SSH server (TCP mode — gets dedicated port)
-zo-tunnel-client --server vps:7000 --id ssh --local localhost:22 --token secret --tcp
+zo-tunnel-client --server vps:6200 --id ssh --local localhost:22 --token secret --tcp
 
 # Access HTTP tunnels
-curl http://vps:8080/webapp/     # → localhost:3000 (Client A)
-curl http://vps:8080/api/users   # → localhost:8000/users (Client B)
+curl http://vps:6210/webapp/     # → localhost:3000 (Client A)
+curl http://vps:6210/api/users   # → localhost:8000/users (Client B)
 
 # Access TCP tunnel (port assigned by server, e.g. 10000)
 ssh user@vps -p 10000            # → localhost:22 (Client C)
@@ -138,9 +139,9 @@ cargo build --release
 | Flag | Default | Env Var | Description |
 |---|---|---|---|
 | `--config`, `-c` | — | `ZO_CONFIG` | Path to YAML config file |
-| `--control-port` | `7000` | `ZO_CONTROL_PORT` | Client control channel port |
-| `--public-port` | `8080` | `ZO_PUBLIC_PORT` | Public HTTP proxy port |
-| `--dashboard-port` | `9000` | `ZO_DASHBOARD_PORT` | Dashboard UI port |
+| `--control-port` | `6200` | `ZO_CONTROL_PORT` | Client control channel port |
+| `--public-port` | `6210` | `ZO_PUBLIC_PORT` | Public HTTP proxy port |
+| `--dashboard-port` | `6220` | `ZO_DASHBOARD_PORT` | Dashboard UI port |
 | `--token` | — | `ZO_TOKEN` | Auth token(s), comma-separated |
 | `--routing-mode` | `path` | `ZO_ROUTING_MODE` | `path` or `subdomain` |
 | `--domain` | — | `ZO_DOMAIN` | Domain for subdomain routing |
@@ -167,9 +168,9 @@ Both server and client support YAML config files (see `configs/` for examples):
 
 ```yaml
 # configs/server.yaml
-control_port: 7000
+control_port: 6200
 public_port: 80
-dashboard_port: 9000
+dashboard_port: 6220
 routing_mode: "path"
 auth:
   tokens:
@@ -188,7 +189,7 @@ tls:
 
 ```yaml
 # configs/client.yaml
-server: "vps-ip:7000"
+server: "vps-ip:6200"
 client_id: "my-webapp"
 local_addr: "localhost:3000"
 token: "token_abc123"
@@ -209,7 +210,7 @@ CLI flags override config file values.
 ```
 Client                             Server
   │                                   │
-  │──── TCP Connect ─────────────────▶│  :7000
+  │──── TCP Connect ─────────────────▶│  :6200
   │──── AUTH_REQ {client_id, token} ─▶│
   │◀─── AUTH_RES {ok, public_port} ──│  validate token
   │                                   │
@@ -230,7 +231,7 @@ Client                             Server
 ### Request Flow (after yamux)
 
 ```
-1. Public user → HTTP request → Server:8080
+1. Public user → HTTP request → Server:6210
 2. Server: parse Host/path → determine client_id
 3. Server: open yamux stream to client
 4. Server: hyper HTTP client → sends request through yamux stream
@@ -242,7 +243,7 @@ Client                             Server
 
 ## 📊 Dashboard
 
-The server includes a built-in web dashboard at the dashboard port (default: 9000):
+The server includes a built-in web dashboard at the dashboard port (default: 6220):
 
 - **Server status** — uptime, version
 - **Connected clients** — list with connection duration
