@@ -9,11 +9,25 @@ pub struct ClientConfig {
     pub client_id: String,
     pub local_addr: String,
     pub token: String,
-    /// Request dedicated TCP port instead of HTTP routing
-    #[serde(default)]
-    pub tcp_mode: bool,
     #[serde(default)]
     pub reconnect: ReconnectConfig,
+    #[serde(default)]
+    pub tls: ClientTlsConfig,
+}
+
+/// TLS configuration for the control channel connection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClientTlsConfig {
+    /// Enable TLS for the control channel
+    #[serde(default)]
+    pub enabled: bool,
+    /// Server name for TLS SNI and certificate verification.
+    /// Default: extracted from the server address hostname.
+    #[serde(default)]
+    pub server_name: String,
+    /// Skip TLS certificate verification (DANGEROUS — only for self-signed certs in dev)
+    #[serde(default)]
+    pub skip_verify: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,20 +79,6 @@ token: "secret123"
         assert_eq!(cfg.client_id, "my-app");
         assert_eq!(cfg.local_addr, "localhost:3000");
         assert_eq!(cfg.token, "secret123");
-        assert!(!cfg.tcp_mode); // default false
-    }
-
-    #[test]
-    fn test_client_config_tcp_mode() {
-        let yaml = r#"
-server: "vps:6200"
-client_id: "db"
-local_addr: "localhost:5432"
-token: "tok"
-tcp_mode: true
-"#;
-        let cfg: ClientConfig = serde_yaml::from_str(yaml).unwrap();
-        assert!(cfg.tcp_mode);
     }
 
     #[test]

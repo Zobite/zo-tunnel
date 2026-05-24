@@ -12,8 +12,6 @@ pub struct ClientEntry {
     pub handle: YamuxHandle,
     pub connected_at: Instant,
     pub metrics: ClientMetrics,
-    /// Dedicated TCP port (None = HTTP-only mode)
-    pub tcp_port: Option<u16>,
 }
 
 /// Per-client traffic metrics.
@@ -44,8 +42,6 @@ pub struct ClientInfo {
     pub bytes_out: u64,
     pub total_requests: u64,
     pub active_streams: u64,
-    /// Dedicated TCP port if assigned (None = HTTP mode)
-    pub tcp_port: Option<u16>,
 }
 
 /// Thread-safe client registry.
@@ -60,21 +56,27 @@ impl Registry {
         }
     }
 
-    /// Register a new client. Returns error if client_id already exists.
+    /// Register a new client. Returns error if client_id already exists or is reserved.
     pub fn register(
         &self,
         client_id: String,
         handle: YamuxHandle,
-        tcp_port: Option<u16>,
     ) -> anyhow::Result<Arc<ClientEntry>> {
         use dashmap::mapref::entry::Entry;
+
+        // Reject reserved subdomains
+        if crate::config::RESERVED_SUBDOMAINS.contains(&client_id.as_str()) {
+            anyhow::bail!(
+                "Client ID '{}' is reserved (conflicts with system subdomain)",
+                client_id
+            );
+        }
 
         let entry = Arc::new(ClientEntry {
             client_id: client_id.clone(),
             handle,
             connected_at: Instant::now(),
             metrics: ClientMetrics::new(),
-            tcp_port,
         });
 
         match self.clients.entry(client_id.clone()) {
@@ -111,7 +113,6 @@ impl Registry {
                     bytes_out: e.metrics.bytes_out.load(Ordering::Relaxed),
                     total_requests: e.metrics.requests.load(Ordering::Relaxed),
                     active_streams: e.metrics.active_streams.load(Ordering::Relaxed),
-                    tcp_port: e.tcp_port,
                 }
             })
             .collect()

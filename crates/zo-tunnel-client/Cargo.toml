@@ -1,6 +1,6 @@
 [package]
 name = "zo-tunnel-client"
-version = "0.3.4"
+version = "0.4.1"
 edition = "2021"
 
 [dependencies]
@@ -17,3 +17,5 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 yamux = { workspace = true }
 futures = { workspace = true }
+tokio-rustls = { workspace = true }
+webpki-roots = { workspace = true }

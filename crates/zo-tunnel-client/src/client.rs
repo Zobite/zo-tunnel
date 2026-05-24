@@ -1,7 +1,9 @@
 //! Zo Tunnel tunnel client — connects to server, accepts yamux streams, proxies to local service.
 
+use crate::config::ClientTlsConfig;
 use anyhow::{bail, Context, Result};
 use std::future::poll_fn;
+use std::sync::Arc;
 use tokio::io;
 use tokio::net::TcpStream;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
@@ -12,33 +14,118 @@ pub struct Client {
     local_addr: String,
     client_id: String,
     token: String,
-    tcp_mode: bool,
+    tls_config: ClientTlsConfig,
 }
 
 impl Client {
-    pub fn new(server_addr: String, local_addr: String, client_id: String, token: String, tcp_mode: bool) -> Self {
+    pub fn new(
+        server_addr: String,
+        local_addr: String,
+        client_id: String,
+        token: String,
+        tls_config: ClientTlsConfig,
+    ) -> Self {
         Self {
             server_addr,
             local_addr,
             client_id,
             token,
-            tcp_mode,
+            tls_config,
         }
     }
 
-    /// Run a single session: connect → auth → yamux → proxy streams.
+    /// Run a single session: connect → (optional TLS) → auth → yamux → proxy streams.
     pub async fn run(&self) -> Result<()> {
-        // ── Connect ──
-        let mut stream = TcpStream::connect(&self.server_addr)
+        // ── Connect TCP ──
+        let stream = TcpStream::connect(&self.server_addr)
             .await
             .with_context(|| format!("connect to {}", self.server_addr))?;
         tracing::info!("Connected to server {}", self.server_addr);
 
-        // ── Authenticate (raw protocol, before yamux) ──
+        if self.tls_config.enabled {
+            // ── TLS mode ──
+            let tls_stream = self.tls_connect(stream).await?;
+            tracing::info!("🔒 TLS handshake complete");
+            self.run_session(tls_stream).await
+        } else {
+            // ── Plain TCP mode ──
+            self.run_session(stream).await
+        }
+    }
+
+    /// Establish a TLS connection over an existing TCP stream.
+    async fn tls_connect(
+        &self,
+        stream: TcpStream,
+    ) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {
+        use tokio_rustls::rustls;
+
+        let config = if self.tls_config.skip_verify {
+            // DANGEROUS: Accept any certificate (for self-signed certs in dev)
+            let crypto_provider = rustls::crypto::ring::default_provider();
+            rustls::ClientConfig::builder_with_provider(Arc::new(crypto_provider))
+                .with_safe_default_protocol_versions()
+                .context("build TLS protocol versions")?
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(NoVerifier))
+                .with_no_client_auth()
+        } else {
+            // Production: verify against Mozilla root CAs
+            let root_store = rustls::RootCertStore::from_iter(
+                webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+            );
+            let crypto_provider = rustls::crypto::ring::default_provider();
+            rustls::ClientConfig::builder_with_provider(Arc::new(crypto_provider))
+                .with_safe_default_protocol_versions()
+                .context("build TLS protocol versions")?
+                .with_root_certificates(root_store)
+                .with_no_client_auth()
+        };
+
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+
+        // Resolve server name for SNI
+        let server_name = self.resolve_server_name()?;
+        tracing::debug!("TLS SNI: {:?}", server_name);
+
+        connector
+            .connect(server_name, stream)
+            .await
+            .context("TLS handshake failed")
+    }
+
+    /// Resolve the server name for TLS SNI.
+    /// Priority: --tls-server-name > hostname from --server
+    fn resolve_server_name(&self) -> Result<tokio_rustls::rustls::pki_types::ServerName<'static>> {
+        use tokio_rustls::rustls::pki_types::ServerName;
+
+        let name = if !self.tls_config.server_name.is_empty() {
+            self.tls_config.server_name.clone()
+        } else {
+            // Extract hostname from server address (strip port)
+            self.server_addr
+                .split(':')
+                .next()
+                .unwrap_or(&self.server_addr)
+                .to_string()
+        };
+
+        ServerName::try_from(name.clone())
+            .map_err(|_| anyhow::anyhow!(
+                "Invalid TLS server name '{}'. If connecting by IP, use --tls-server-name to specify the domain.",
+                name
+            ))
+    }
+
+    /// Run the authenticated tunnel session over any stream type.
+    async fn run_session<S>(&self, mut stream: S) -> Result<()>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        // ── Authenticate (before yamux) ──
         let auth_req = Message::AuthReq(AuthReq {
             client_id: self.client_id.clone(),
             token: self.token.clone(),
-            tcp_mode: self.tcp_mode,
         });
         write_message(&mut stream, &auth_req).await?;
         tracing::debug!("Sent AuthReq");
@@ -51,18 +138,11 @@ impl Client {
                 if !res.success {
                     bail!("Authentication failed: {}", res.message);
                 }
-                if let Some(tcp_port) = res.tcp_port {
-                    tracing::info!(
-                        "✅ Authenticated! Dedicated TCP port: {}",
-                        tcp_port
-                    );
-                } else {
-                    tracing::info!(
-                        "✅ Authenticated! HTTP port: {} | Route: {}",
-                        res.public_port.unwrap_or(0),
-                        res.assigned_route.as_deref().unwrap_or("-")
-                    );
-                }
+                tracing::info!(
+                    "✅ Authenticated! Route: {} | Public port: {}",
+                    res.assigned_route.as_deref().unwrap_or("-"),
+                    res.public_port.unwrap_or(0)
+                );
             }
             other => {
                 bail!("Expected AuthRes, got {:?}", other);
@@ -78,7 +158,7 @@ impl Client {
         tracing::info!("🚇 Tunnel active — waiting for connections...");
 
         // Drive the yamux connection, accepting incoming streams from the server.
-        // Each stream = one public HTTP request being proxied.
+        // Each stream = one public request being proxied.
         loop {
             let maybe_stream = poll_fn(|cx| conn.poll_next_inbound(cx)).await;
             match maybe_stream {
@@ -133,5 +213,52 @@ impl Client {
         }
 
         Ok(())
+    }
+}
+
+// ─── No-verify TLS (for self-signed certs) ──────────────────────
+
+/// A TLS certificate verifier that accepts any certificate.
+/// ONLY for development with self-signed certificates.
+#[derive(Debug)]
+struct NoVerifier;
+
+impl tokio_rustls::rustls::client::danger::ServerCertVerifier for NoVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[tokio_rustls::rustls::pki_types::CertificateDer<'_>],
+        _server_name: &tokio_rustls::rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: tokio_rustls::rustls::pki_types::UnixTime,
+    ) -> Result<tokio_rustls::rustls::client::danger::ServerCertVerified, tokio_rustls::rustls::Error>
+    {
+        Ok(tokio_rustls::rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
+        _dss: &tokio_rustls::rustls::DigitallySignedStruct,
+    ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error>
+    {
+        Ok(tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
+        _dss: &tokio_rustls::rustls::DigitallySignedStruct,
+    ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error>
+    {
+        Ok(tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<tokio_rustls::rustls::SignatureScheme> {
+        tokio_rustls::rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }

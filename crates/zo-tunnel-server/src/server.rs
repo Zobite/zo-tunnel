@@ -1,21 +1,22 @@
 //! Core server — control channel, public HTTP proxy, dashboard, TCP tunnels.
 
-use crate::config::{RoutingMode, ServerConfig};
+use crate::config::ServerConfig;
 use crate::dashboard::{self, DashboardState};
 use crate::metrics::{Metrics, RateLimiter};
 use crate::proxy;
 use crate::registry::Registry;
 use anyhow::{Context, Result};
-use dashmap::DashSet;
+use http_body_util::BodyExt;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
+use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::future::poll_fn;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
-use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
+use tokio_util::compat::TokioAsyncReadCompatExt;
 use zo_tunnel_protocol::*;
 
 /// Command sent to the yamux driver task.
@@ -46,11 +47,14 @@ impl YamuxHandle {
 
 /// Spawns a task that drives the yamux connection.
 /// Returns a handle for opening outbound streams.
-fn spawn_yamux_driver(
-    stream: tokio::net::TcpStream,
+fn spawn_yamux_driver<S>(
+    stream: S,
     mode: yamux::Mode,
     client_id: String,
-) -> (YamuxHandle, tokio::task::JoinHandle<()>) {
+) -> (YamuxHandle, tokio::task::JoinHandle<()>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<YamuxCmd>(64);
 
     let handle = YamuxHandle { cmd_tx };
@@ -101,39 +105,6 @@ fn spawn_yamux_driver(
     (handle, task)
 }
 
-/// Manages TCP port allocation from a configured range.
-pub struct TcpPortAllocator {
-    used: DashSet<u16>,
-    port_start: u16,
-    port_end: u16,
-}
-
-impl TcpPortAllocator {
-    pub fn new(port_start: u16, port_end: u16) -> Self {
-        Self {
-            used: DashSet::new(),
-            port_start,
-            port_end,
-        }
-    }
-
-
-    /// Allocate a free port from the range. Returns None if all ports are taken.
-    pub fn allocate(&self) -> Option<u16> {
-        (self.port_start..=self.port_end).find(|port| self.used.insert(*port))
-    }
-
-    /// Release a previously allocated port.
-    pub fn release(&self, port: u16) {
-        self.used.remove(&port);
-    }
-
-    /// Total capacity.
-    pub fn capacity(&self) -> usize {
-        (self.port_end - self.port_start + 1) as usize
-    }
-}
-
 /// Core Zo Tunnel server.
 pub struct Server {
     config: ServerConfig,
@@ -148,37 +119,22 @@ impl Server {
         let registry = Arc::new(Registry::new());
         let metrics = Arc::new(Metrics::new());
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.requests_per_second));
-        let tcp_allocator = Arc::new(TcpPortAllocator::new(
-            self.config.tcp_ports.port_start,
-            self.config.tcp_ports.port_end,
-        ));
+
+        // ── Validate domain ──
+        if self.config.domain.is_empty() {
+            anyhow::bail!("domain is required — run `zo-tunnel-server setup --domain <domain>` first");
+        }
+        let domain = &self.config.domain;
 
         // ── Bind control port ──
         let control_listener = TcpListener::bind(("0.0.0.0", self.config.control_port))
             .await
             .with_context(|| format!("bind control port {}", self.config.control_port))?;
-        tracing::info!("🔌 Control channel on :{}", self.config.control_port);
-
-        // ── Bind public port ──
-        let public_listener = TcpListener::bind(("0.0.0.0", self.config.public_port))
-            .await
-            .with_context(|| format!("bind public port {}", self.config.public_port))?;
-        tracing::info!("🌐 Public HTTP on :{}", self.config.public_port);
-
-        // ── Bind dashboard port ──
-        let dashboard_listener = TcpListener::bind(("0.0.0.0", self.config.dashboard_port))
-            .await
-            .with_context(|| format!("bind dashboard port {}", self.config.dashboard_port))?;
-        tracing::info!("📊 Dashboard on :{}", self.config.dashboard_port);
-
-        if self.config.tcp_ports.enabled {
-            tracing::info!(
-                "🔌 TCP port range: {}-{} ({} ports)",
-                self.config.tcp_ports.port_start,
-                self.config.tcp_ports.port_end,
-                tcp_allocator.capacity()
-            );
-        }
+        tracing::info!(
+            "🔌 Control channel on :{}{}",
+            self.config.control_port,
+            if self.config.tls.enabled { " (TLS)" } else { "" }
+        );
 
         // ── TLS setup (optional) ──
         let tls_acceptor = if self.config.tls.enabled {
@@ -187,28 +143,7 @@ impl Server {
             None
         };
 
-        // ── Spawn control channel acceptor ──
-        let reg_ctrl = registry.clone();
-        let met_ctrl = metrics.clone();
-        let alloc_ctrl = tcp_allocator.clone();
-        let config_ctrl = self.config.clone();
-        let mut control_task = tokio::spawn(async move {
-            Self::accept_clients(control_listener, reg_ctrl, met_ctrl, alloc_ctrl, config_ctrl).await;
-        });
-
-        // ── Spawn public HTTP proxy ──
-        let reg_pub = registry.clone();
-        let met_pub = metrics.clone();
-        let rl_pub = rate_limiter.clone();
-        let routing = self.config.routing_mode.clone();
-        let domain = self.config.domain.clone();
-        let tls_pub = tls_acceptor.clone();
-        let mut public_task = tokio::spawn(async move {
-            Self::accept_public(public_listener, reg_pub, met_pub, rl_pub, routing, domain, tls_pub)
-                .await;
-        });
-
-        // ── Spawn dashboard ──
+        // ── Dashboard state ──
         let dash_state = DashboardState {
             registry: registry.clone(),
             metrics: metrics.clone(),
@@ -219,41 +154,59 @@ impl Server {
                 self.config.dashboard_auth.session_ttl_secs,
             )),
         };
-        if dash_state.auth_enabled {
+
+        if self.config.dashboard_auth_enabled() {
             tracing::info!("🔒 Dashboard authentication enabled");
         } else {
             tracing::warn!("⚠️  Dashboard authentication disabled — dashboard is open to anyone");
         }
-        let mut dashboard_task = tokio::spawn(async move {
-            let app = dashboard::create_router(dash_state);
-            if let Err(e) = axum::serve(dashboard_listener, app).await {
-                tracing::error!("Dashboard error: {}", e);
-            }
+
+        // ── Spawn control channel acceptor ──
+        let reg_ctrl = registry.clone();
+        let met_ctrl = metrics.clone();
+        let config_ctrl = self.config.clone();
+        let tls_ctrl = tls_acceptor.clone();
+        let control_task = tokio::spawn(async move {
+            Self::accept_clients(control_listener, tls_ctrl, reg_ctrl, met_ctrl, config_ctrl).await;
+        });
+
+        // ── Public HTTP listener (subdomain proxy + dashboard) ──
+        let public_listener = TcpListener::bind(("0.0.0.0", self.config.public_port))
+            .await
+            .with_context(|| format!("bind public port {}", self.config.public_port))?;
+        tracing::info!("🌐 Public HTTP on :{}", self.config.public_port);
+
+        let dashboard_router = dashboard::create_router(dash_state);
+        tracing::info!("📊 Dashboard at dashboard.{}", domain);
+
+        let reg_pub = registry.clone();
+        let met_pub = metrics.clone();
+        let rl_pub = rate_limiter.clone();
+        let dom = domain.clone();
+        let tls_pub = tls_acceptor.clone();
+        let public_task = tokio::spawn(async move {
+            Self::accept_public(public_listener, reg_pub, met_pub, rl_pub, dom, dashboard_router, tls_pub)
+                .await;
         });
 
         tracing::info!("✅ Zo Tunnel Server ready!");
 
         // ── Wait for shutdown ──
+        let shutdown = async {
+            tokio::signal::ctrl_c().await.ok();
+            tracing::info!("🛑 Shutdown signal received, cleaning up...");
+        };
+
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                tracing::info!("🛑 Shutdown signal received, cleaning up...");
-            }
-            _ = &mut control_task => {
+            _ = shutdown => {}
+            _ = control_task => {
                 tracing::error!("Control task ended unexpectedly");
-            }
-            _ = &mut public_task => {
-                tracing::error!("Public task ended unexpectedly");
-            }
-            _ = &mut dashboard_task => {
-                tracing::error!("Dashboard task ended unexpectedly");
             }
         }
 
         // ── Graceful cleanup ──
-        tracing::info!("🧹 Aborting listener tasks...");
-        control_task.abort();
+        tracing::info!("🧹 Cleaning up...");
         public_task.abort();
-        dashboard_task.abort();
 
         let connected = registry.count();
         if connected > 0 {
@@ -301,9 +254,9 @@ impl Server {
     /// Accept and handle control channel connections from tunnel clients.
     async fn accept_clients(
         listener: TcpListener,
+        tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
         registry: Arc<Registry>,
         metrics: Arc<Metrics>,
-        tcp_allocator: Arc<TcpPortAllocator>,
         config: ServerConfig,
     ) {
         loop {
@@ -314,12 +267,25 @@ impl Server {
 
                     let reg = registry.clone();
                     let met = metrics.clone();
-                    let alloc = tcp_allocator.clone();
                     let cfg = config.clone();
+                    let tls = tls_acceptor.clone();
 
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_client(stream, reg, met, alloc, cfg).await {
-                            tracing::warn!("Client {} error: {:#}", addr, e);
+                        if let Some(acceptor) = tls {
+                            match acceptor.accept(stream).await {
+                                Ok(tls_stream) => {
+                                    if let Err(e) = Self::handle_client(tls_stream, reg, met, cfg).await {
+                                        tracing::warn!("Client {} error: {:#}", addr, e);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("TLS handshake failed from {}: {}", addr, e);
+                                }
+                            }
+                        } else {
+                            if let Err(e) = Self::handle_client(stream, reg, met, cfg).await {
+                                tracing::warn!("Client {} error: {:#}", addr, e);
+                            }
                         }
                     });
                 }
@@ -332,13 +298,15 @@ impl Server {
     }
 
     /// Handle a single client session: auth → yamux → serve streams.
-    async fn handle_client(
-        mut stream: tokio::net::TcpStream,
+    async fn handle_client<S>(
+        mut stream: S,
         registry: Arc<Registry>,
         metrics: Arc<Metrics>,
-        tcp_allocator: Arc<TcpPortAllocator>,
         config: ServerConfig,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
         // ── Auth handshake (before yamux, with timeout) ──
         let auth_msg = tokio::time::timeout(
             std::time::Duration::from_secs(10),
@@ -348,9 +316,9 @@ impl Server {
         .map_err(|_| anyhow::anyhow!("auth timeout: client did not send AuthReq within 10s"))?
         .context("read auth message")?;
 
-        let (client_id, tcp_mode) = match auth_msg {
+        let client_id = match auth_msg {
             Message::AuthReq(auth) => {
-                tracing::info!("🔑 Auth from '{}' (tcp_mode={})", auth.client_id, auth.tcp_mode);
+                tracing::info!("🔑 Auth from '{}'", auth.client_id);
 
                 if !config.validate_token(&auth.token) {
                     let res = Message::AuthRes(AuthRes {
@@ -358,7 +326,6 @@ impl Server {
                         message: "Invalid token".into(),
                         public_port: None,
                         assigned_route: None,
-                        tcp_port: None,
                     });
                     write_message(&mut stream, &res).await?;
                     metrics.failed_auth.fetch_add(1, Ordering::Relaxed);
@@ -366,60 +333,22 @@ impl Server {
                     return Ok(());
                 }
 
-                // ── Allocate TCP port if requested ──
-                let assigned_tcp_port = if auth.tcp_mode && config.tcp_ports.enabled {
-                    match tcp_allocator.allocate() {
-                        Some(port) => {
-                            tracing::info!("🔌 Allocated TCP port {} for '{}'", port, auth.client_id);
-                            Some(port)
-                        }
-                        None => {
-                            let res = Message::AuthRes(AuthRes {
-                                success: false,
-                                message: "No TCP ports available".into(),
-                                public_port: None,
-                                assigned_route: None,
-                                tcp_port: None,
-                            });
-                            write_message(&mut stream, &res).await?;
-                            tracing::warn!("❌ No TCP ports for '{}'", auth.client_id);
-                            return Ok(());
-                        }
-                    }
-                } else {
-                    None
-                };
-
-                let msg = if let Some(tcp_port) = assigned_tcp_port {
-                    format!("OK — TCP port {}", tcp_port)
-                } else {
-                    format!("OK — HTTP route /{}", auth.client_id)
-                };
-
                 let res = Message::AuthRes(AuthRes {
                     success: true,
-                    message: msg,
+                    message: format!("OK — {}.{}", auth.client_id, config.domain),
                     public_port: Some(config.public_port),
                     assigned_route: Some(auth.client_id.clone()),
-                    tcp_port: assigned_tcp_port,
                 });
                 write_message(&mut stream, &res).await?;
 
-                if let Some(tcp_port) = assigned_tcp_port {
-                    tracing::info!(
-                        "✅ '{}' authenticated → TCP port: {}",
-                        auth.client_id,
-                        tcp_port
-                    );
-                } else {
-                    tracing::info!(
-                        "✅ '{}' authenticated → route: /{}",
-                        auth.client_id,
-                        auth.client_id
-                    );
-                }
+                tracing::info!(
+                    "✅ '{}' authenticated → {}.{}",
+                    auth.client_id,
+                    auth.client_id,
+                    config.domain
+                );
 
-                (auth.client_id, assigned_tcp_port)
+                auth.client_id
             }
             other => {
                 tracing::warn!("Expected AuthReq, got {:?}", other);
@@ -432,14 +361,11 @@ impl Server {
             spawn_yamux_driver(stream, yamux::Mode::Server, client_id.clone());
 
         // Register client
-        let _entry = match registry.register(client_id.clone(), yamux_handle.clone(), tcp_mode) {
+        let _entry = match registry.register(client_id.clone(), yamux_handle.clone()) {
             Ok(e) => e,
             Err(e) => {
                 tracing::warn!("Registration failed for '{}': {}", client_id, e);
                 driver_task.abort();
-                if let Some(port) = tcp_mode {
-                    tcp_allocator.release(port);
-                }
                 return Ok(());
             }
         };
@@ -450,31 +376,8 @@ impl Server {
             registry.count()
         );
 
-        // ── Spawn TCP listener if in TCP mode ──
-        let tcp_listener_task = if let Some(tcp_port) = tcp_mode {
-            let handle = yamux_handle.clone();
-            let cid = client_id.clone();
-            let met = metrics.clone();
-            Some(tokio::spawn(async move {
-                Self::run_tcp_tunnel(tcp_port, handle, cid, met).await;
-            }))
-        } else {
-            None
-        };
-
         // Wait for the yamux driver to finish (= client disconnect)
         let _ = driver_task.await;
-
-        // Stop TCP listener if active
-        if let Some(task) = tcp_listener_task {
-            task.abort();
-        }
-
-        // Release TCP port
-        if let Some(port) = tcp_mode {
-            tcp_allocator.release(port);
-            tracing::info!("🔓 Released TCP port {} from '{}'", port, client_id);
-        }
 
         // Client disconnected — unregister
         registry.unregister(&client_id);
@@ -487,92 +390,14 @@ impl Server {
         Ok(())
     }
 
-    /// Run a dedicated TCP listener for a single client.
-    /// Accepts raw TCP connections and pipes them through yamux streams.
-    async fn run_tcp_tunnel(
-        port: u16,
-        yamux_handle: YamuxHandle,
-        client_id: String,
-        metrics: Arc<Metrics>,
-    ) {
-        let listener = match TcpListener::bind(("0.0.0.0", port)).await {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::error!("Failed to bind TCP port {} for '{}': {}", port, client_id, e);
-                return;
-            }
-        };
-
-        tracing::info!("🔌 TCP tunnel for '{}' listening on :{}", client_id, port);
-
-        loop {
-            let (tcp_stream, peer_addr) = match listener.accept().await {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::debug!("TCP accept error on port {}: {}", port, e);
-                    continue;
-                }
-            };
-
-            tracing::info!(
-                "🔗 TCP:{} ← {} → '{}'",
-                port,
-                peer_addr,
-                client_id
-            );
-            metrics.total_requests.fetch_add(1, Ordering::Relaxed);
-
-            let handle = yamux_handle.clone();
-            let cid = client_id.clone();
-            let met = metrics.clone();
-
-            tokio::spawn(async move {
-                if let Err(e) = Self::handle_tcp_connection(tcp_stream, handle, &cid, met).await {
-                    tracing::debug!("TCP tunnel stream error for '{}': {}", cid, e);
-                }
-            });
-        }
-    }
-
-    /// Handle a single TCP connection: open yamux stream → bidirectional pipe.
-    async fn handle_tcp_connection(
-        mut tcp_stream: tokio::net::TcpStream,
-        yamux_handle: YamuxHandle,
-        client_id: &str,
-        metrics: Arc<Metrics>,
-    ) -> Result<()> {
-        // Open yamux stream to client
-        let yamux_stream = yamux_handle
-            .open_stream()
-            .await
-            .with_context(|| format!("open yamux stream to '{}'", client_id))?;
-
-        // Convert yamux stream (futures IO) → tokio IO
-        let mut compat_stream = yamux_stream.compat();
-
-        // Bidirectional pipe: public TCP ↔ yamux ↔ client ↔ local service
-        match tokio::io::copy_bidirectional(&mut tcp_stream, &mut compat_stream).await {
-            Ok((up, down)) => {
-                metrics.total_bytes_in.fetch_add(up, Ordering::Relaxed);
-                metrics.total_bytes_out.fetch_add(down, Ordering::Relaxed);
-                tracing::debug!("TCP stream for '{}' done: ↑{}B ↓{}B", client_id, up, down);
-            }
-            Err(e) => {
-                tracing::debug!("TCP stream pipe error for '{}': {}", client_id, e);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Accept public HTTP connections and proxy them through tunnels.
+    /// Accept public HTTP connections — serves both tunnel proxy and dashboard.
     async fn accept_public(
         listener: TcpListener,
         registry: Arc<Registry>,
         metrics: Arc<Metrics>,
         rate_limiter: Arc<RateLimiter>,
-        routing_mode: RoutingMode,
-        domain: Option<String>,
+        domain: String,
+        dashboard_router: axum::Router,
         tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     ) {
         loop {
@@ -588,15 +413,15 @@ impl Server {
             let reg = registry.clone();
             let met = metrics.clone();
             let rl = rate_limiter.clone();
-            let rm = routing_mode.clone();
             let dom = domain.clone();
+            let dash = dashboard_router.clone();
             let tls = tls_acceptor.clone();
 
             tokio::spawn(async move {
                 let result = if let Some(acceptor) = tls {
                     match acceptor.accept(tcp_stream).await {
                         Ok(tls_stream) => {
-                            Self::serve_http(TokioIo::new(tls_stream), reg, met, rl, rm, dom).await
+                            Self::serve_http(TokioIo::new(tls_stream), reg, met, rl, dom, dash).await
                         }
                         Err(e) => {
                             tracing::debug!("TLS accept error from {}: {}", addr, e);
@@ -604,7 +429,7 @@ impl Server {
                         }
                     }
                 } else {
-                    Self::serve_http(TokioIo::new(tcp_stream), reg, met, rl, rm, dom).await
+                    Self::serve_http(TokioIo::new(tcp_stream), reg, met, rl, dom, dash).await
                 };
 
                 if let Err(e) = result {
@@ -614,84 +439,87 @@ impl Server {
         }
     }
 
-    /// Serve a single HTTP connection.
+    /// Serve a single HTTP connection — routes to dashboard or tunnel proxy by subdomain.
     async fn serve_http<I>(
         io: I,
         registry: Arc<Registry>,
         metrics: Arc<Metrics>,
         rate_limiter: Arc<RateLimiter>,
-        routing_mode: RoutingMode,
-        domain: Option<String>,
+        domain: String,
+        dashboard_router: axum::Router,
     ) -> Result<()>
     where
         I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
     {
+        let dashboard_host = format!("dashboard.{}", domain);
+
         http1::Builder::new()
             .serve_connection(
                 io,
-                service_fn(move |req| {
+                service_fn(move |req: Request<hyper::body::Incoming>| {
                     let reg = registry.clone();
                     let met = metrics.clone();
                     let rl = rate_limiter.clone();
-                    let rm = routing_mode.clone();
                     let dom = domain.clone();
-                    async move { proxy::handle_proxy_request(req, reg, met, rl, rm, dom).await }
+                    let dash = dashboard_router.clone();
+                    let dash_host = dashboard_host.clone();
+                    async move {
+                        // Check Host header to decide routing
+                        let host = req
+                            .headers()
+                            .get("host")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("");
+                        let host_no_port = host.split(':').next().unwrap_or(host);
+
+                        if host_no_port == dash_host {
+                            // Route to dashboard
+                            Self::handle_dashboard(req, dash).await
+                        } else {
+                            // Route to tunnel proxy
+                            proxy::handle_proxy_request(req, reg, met, rl, dom).await
+                        }
+                    }
                 }),
             )
             .await
             .context("serve HTTP connection")?;
         Ok(())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::TcpPortAllocator;
+    /// Forward a request to the dashboard axum app.
+    async fn handle_dashboard(
+        req: Request<hyper::body::Incoming>,
+        router: axum::Router,
+    ) -> Result<Response<proxy::BoxBody>, hyper::Error> {
+        use tower::ServiceExt;
 
-    #[test]
-    fn test_allocator_basic() {
-        let alloc = TcpPortAllocator::new(5000, 5002);
-        assert_eq!(alloc.capacity(), 3);
-        assert_eq!(alloc.allocate(), Some(5000));
-        assert_eq!(alloc.allocate(), Some(5001));
-        assert_eq!(alloc.allocate(), Some(5002));
-    }
+        // Convert hyper Incoming body → axum Body
+        let (parts, body) = req.into_parts();
+        let axum_body = axum::body::Body::new(body);
+        let axum_req = Request::from_parts(parts, axum_body);
 
-    #[test]
-    fn test_allocator_exhaustion() {
-        let alloc = TcpPortAllocator::new(5000, 5001);
-        assert_eq!(alloc.allocate(), Some(5000));
-        assert_eq!(alloc.allocate(), Some(5001));
-        // All ports used
-        assert_eq!(alloc.allocate(), None);
-    }
+        // Call the axum router
+        let axum_resp = router
+            .oneshot(axum_req)
+            .await
+            .unwrap_or_else(|_| {
+                Response::builder()
+                    .status(500)
+                    .body(axum::body::Body::empty())
+                    .unwrap()
+            });
 
-    #[test]
-    fn test_allocator_release_and_reuse() {
-        let alloc = TcpPortAllocator::new(5000, 5000); // single port
-        assert_eq!(alloc.capacity(), 1);
+        // Convert axum response → proxy BoxBody by collecting bytes
+        let (parts, axum_body) = axum_resp.into_parts();
+        let collected = axum_body
+            .collect()
+            .await
+            .unwrap_or_else(|_| http_body_util::Collected::default());
+        let box_body = http_body_util::Full::new(collected.to_bytes())
+            .map_err(|never| match never {})
+            .boxed();
 
-        let port = alloc.allocate().unwrap();
-        assert_eq!(port, 5000);
-        assert_eq!(alloc.allocate(), None); // exhausted
-
-        alloc.release(port);
-        assert_eq!(alloc.allocate(), Some(5000)); // reusable
-    }
-
-    #[test]
-    fn test_allocator_release_untracked_port() {
-        let alloc = TcpPortAllocator::new(5000, 5002);
-        // Releasing a port that was never allocated is a no-op
-        alloc.release(9999);
-        assert_eq!(alloc.capacity(), 3);
-    }
-
-    #[test]
-    fn test_allocator_single_port_range() {
-        let alloc = TcpPortAllocator::new(8000, 8000);
-        assert_eq!(alloc.capacity(), 1);
-        assert_eq!(alloc.allocate(), Some(8000));
-        assert_eq!(alloc.allocate(), None);
+        Ok(Response::from_parts(parts, box_body))
     }
 }

@@ -22,11 +22,8 @@ pub const MAX_PAYLOAD_SIZE: u32 = 16 * 1024 * 1024;
 /// Default control port
 pub const DEFAULT_CONTROL_PORT: u16 = 6200;
 
-/// Default public port
+/// Default public port (HTTP subdomain routing + dashboard)
 pub const DEFAULT_PUBLIC_PORT: u16 = 6210;
-
-/// Default dashboard port
-pub const DEFAULT_DASHBOARD_PORT: u16 = 6220;
 
 /// Heartbeat interval in seconds
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
@@ -76,9 +73,6 @@ impl TryFrom<u8> for MessageType {
 pub struct AuthReq {
     pub client_id: String,
     pub token: String,
-    /// Request a dedicated TCP port for raw TCP forwarding (SSH, DB, etc.)
-    #[serde(default)]
-    pub tcp_mode: bool,
 }
 
 /// Authentication response from server
@@ -86,13 +80,10 @@ pub struct AuthReq {
 pub struct AuthRes {
     pub success: bool,
     pub message: String,
-    /// The public HTTP port (for HTTP proxy mode)
+    /// The public HTTP port
     pub public_port: Option<u16>,
-    /// Assigned subdomain or path prefix
+    /// Assigned subdomain route (e.g. "my-app")
     pub assigned_route: Option<String>,
-    /// Dedicated TCP port assigned to this client (for TCP mode)
-    #[serde(default)]
-    pub tcp_port: Option<u16>,
 }
 
 /// Server notifying client of a new incoming connection
@@ -263,7 +254,6 @@ mod tests {
         let msg = Message::AuthReq(AuthReq {
             client_id: "test-client".into(),
             token: "secret123".into(),
-            tcp_mode: false,
         });
 
         write_message(&mut client, &msg).await.unwrap();
@@ -286,7 +276,6 @@ mod tests {
             message: "OK".into(),
             public_port: Some(6210),
             assigned_route: Some("my-app".into()),
-            tcp_port: Some(10001),
         });
 
         write_message(&mut client, &msg).await.unwrap();
@@ -295,7 +284,6 @@ mod tests {
         if let Message::AuthRes(res) = received {
             assert!(res.success);
             assert_eq!(res.assigned_route, Some("my-app".into()));
-            assert_eq!(res.tcp_port, Some(10001));
         } else {
             panic!("Expected AuthRes, got {:?}", received);
         }
@@ -340,7 +328,6 @@ mod tests {
             message: "denied".into(),
             public_port: None,
             assigned_route: None,
-            tcp_port: None,
         });
 
         write_message(&mut client, &msg).await.unwrap();
@@ -351,32 +338,12 @@ mod tests {
             assert_eq!(res.message, "denied");
             assert!(res.public_port.is_none());
             assert!(res.assigned_route.is_none());
-            assert!(res.tcp_port.is_none());
         } else {
             panic!("Expected AuthRes, got {:?}", received);
         }
     }
 
-    #[tokio::test]
-    async fn test_auth_req_with_tcp_mode() {
-        let (mut client, mut server) = duplex(1024);
 
-        let msg = Message::AuthReq(AuthReq {
-            client_id: "db-tunnel".into(),
-            token: "tok".into(),
-            tcp_mode: true,
-        });
-
-        write_message(&mut client, &msg).await.unwrap();
-        let received = read_message(&mut server).await.unwrap();
-
-        if let Message::AuthReq(auth) = received {
-            assert_eq!(auth.client_id, "db-tunnel");
-            assert!(auth.tcp_mode);
-        } else {
-            panic!("Expected AuthReq, got {:?}", received);
-        }
-    }
 
     #[tokio::test]
     async fn test_read_from_closed_connection() {
@@ -395,7 +362,6 @@ mod tests {
         let msg = Message::AuthReq(AuthReq {
             client_id: long_id.clone(),
             token: "t".into(),
-            tcp_mode: false,
         });
 
         write_message(&mut client, &msg).await.unwrap();
@@ -414,7 +380,6 @@ mod tests {
         assert_eq!(MAX_PAYLOAD_SIZE, 16 * 1024 * 1024);
         assert_eq!(DEFAULT_CONTROL_PORT, 6200);
         assert_eq!(DEFAULT_PUBLIC_PORT, 6210);
-        assert_eq!(DEFAULT_DASHBOARD_PORT, 6220);
         assert_eq!(HEARTBEAT_INTERVAL_SECS, 10);
         assert_eq!(HEARTBEAT_TIMEOUT_SECS, 35);
     }

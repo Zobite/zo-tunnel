@@ -186,15 +186,21 @@ echo ""
 
 if [ "$COMPONENT" = "client" ] || [ "$COMPONENT" = "all" ]; then
     echo "  Client usage:"
-    echo -e "    ${CYAN}zo-tunnel-client --server YOUR_VPS:6200 \\${NC}"
-    echo -e "    ${CYAN}  --local localhost:3000 --id my-app \\${NC}"
+    echo -e "    ${CYAN}zo-tunnel-client --server YOUR_VPS:6200${NC} \\"
+    echo -e "    ${CYAN}  --local localhost:3000 --id my-app${NC} \\"
     echo -e "    ${CYAN}  --token YOUR_TOKEN${NC}"
     echo ""
 fi
 
 if [ "$COMPONENT" = "server" ] || [ "$COMPONENT" = "all" ]; then
-    echo "  Server usage:"
-    echo -e "    ${CYAN}zo-tunnel-server --token SECRET${NC}"
+    echo "  Server setup (port mode — simplest):"
+    echo -e "    ${CYAN}zo-tunnel-server setup${NC}"
+    echo ""
+    echo "  Or with subdomain mode:"
+    echo -e "    ${CYAN}zo-tunnel-server setup --domain YOUR_DOMAIN${NC}"
+    echo ""
+    echo "  Start server:"
+    echo -e "    ${CYAN}zo-tunnel-server start${NC}"
     echo ""
 fi
 

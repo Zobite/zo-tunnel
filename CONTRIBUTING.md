@@ -2,8 +2,6 @@
 
 Thank you for your interest in Zo Tunnel! 🚀
 
-This document provides guidelines on how to contribute to the project.
-
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -28,6 +26,19 @@ cargo test --workspace
 cargo clippy --workspace -- -D warnings
 ```
 
+### Local Dev
+
+```bash
+# Setup server config (port mode, no domain needed)
+make setup-server
+
+# Start server
+make run-server
+
+# Connect a test client
+make run-client
+```
+
 ## 📝 Contribution Workflow
 
 ### 1. Create an Issue first
@@ -39,18 +50,14 @@ Before writing code, create or comment on a related issue:
 ### 2. Fork & Branch
 
 ```bash
-# Fork the repo on GitHub
-# Clone your fork locally
 git clone https://github.com/<your-username>/zo-tunnel.git
-
-# Create a new branch
 git checkout -b fix/short-description
 ```
 
-**Branch naming conventions:**
+**Branch naming:**
 - `fix/description` — bug fix
 - `feat/description` — new feature
-- `docs/description` — documentation update
+- `docs/description` — documentation
 - `refactor/description` — code refactor
 
 ### 3. Code
@@ -67,18 +74,17 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 ```
 feat: add WebSocket tunnel support
 fix: handle client disconnect during auth
-docs: update README with new default ports
-refactor: simplify rate limiter logic
-test: add routing extraction tests
+docs: update README with new architecture
+refactor: simplify port allocation logic
+test: add subdomain routing tests
 ```
 
 ### 5. Create a Pull Request
 
 - Push your branch to your fork
-- Create a PR targeting the `main` branch of the original repo
-- Fill in the PR template completely
+- Create a PR targeting `main`
+- Fill in the PR template
 - Wait for CI to pass (tests + clippy)
-- A maintainer will review and provide feedback
 
 ## 🏗️ Project Structure
 
@@ -87,11 +93,19 @@ zo-tunnel/
 ├── crates/
 │   ├── zo-tunnel-protocol/     # Shared protocol (messages, encoding)
 │   ├── zo-tunnel-server/       # Server binary
+│   │   └── src/
+│   │       ├── main.rs         # CLI: setup / start / status
+│   │       ├── config.rs       # Config with port & subdomain modes
+│   │       ├── server.rs       # Core: control, yamux, port allocation
+│   │       ├── proxy.rs        # HTTP proxy (subdomain mode)
+│   │       ├── dashboard.rs    # Dashboard API + UI
+│   │       ├── registry.rs     # Client registry
+│   │       └── metrics.rs      # Metrics + rate limiter
 │   └── zo-tunnel-client/       # Client binary
-├── web/                        # Dashboard UI
-├── configs/                    # Sample YAML configs
-├── scripts/                    # Build, install, test scripts
-└── .github/workflows/          # CI/CD
+├── web/                        # Dashboard UI (HTML/CSS/JS)
+├── configs/                    # Example YAML configs
+├── scripts/                    # Install, test scripts
+└── .github/                    # Issue templates, PR template
 ```
 
 ## 🧪 Testing
@@ -100,21 +114,21 @@ zo-tunnel/
 # Unit tests
 cargo test --workspace
 
-# E2E test (requires release build first)
+# E2E test (requires release build)
 cargo build --release
 bash scripts/e2e_test.sh
 ```
 
 ## 📋 Coding Style
 
-- **Formatter:** `cargo fmt` (uses rustfmt defaults)
+- **Formatter:** `cargo fmt` (rustfmt defaults)
 - **Linter:** `cargo clippy -- -D warnings`
-- **Error handling:** Use `anyhow::Result` + `.context("description")`
-- **Logging:** Use `tracing::{info, debug, warn, error}`
+- **Error handling:** `anyhow::Result` + `.context("description")`
+- **Logging:** `tracing::{info, debug, warn, error}`
 - **Async:** All I/O must be async (tokio)
 
 ## ❓ Questions?
 
-If you have any questions, please create a [Discussion](https://github.com/Zobite/zo-tunnel/discussions) or open an Issue.
+Create a [Discussion](https://github.com/Zobite/zo-tunnel/discussions) or open an Issue.
 
 Thank you for contributing! ❤️

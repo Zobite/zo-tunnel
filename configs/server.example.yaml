@@ -1,0 +1,33 @@
+# Zo Tunnel Server Configuration
+
+# Control channel port (client connections)
+control_port: 6200
+
+# Public HTTP port (subdomain routing + dashboard)
+public_port: 6210
+
+# Base domain (required) — each client at <client_id>.<domain>
+domain: "tunnel.example.com"
+
+# TLS for control channel (optional)
+tls:
+  enabled: false
+  cert: "/etc/zo-tunnel/server.crt"
+  key: "/etc/zo-tunnel/server.key"
+
+# Client authentication
+auth:
+  tokens:
+    - "your-secret-token-here"
+
+# Dashboard authentication
+dashboard_auth:
+  token: "your-dashboard-token"
+  session_ttl_secs: 86400
+
+# Rate limiting
+rate_limit:
+  requests_per_second: 100
+  max_connections_per_client: 50
+
+log_level: "info"

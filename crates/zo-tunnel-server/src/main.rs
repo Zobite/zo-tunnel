@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
-use clap::Parser;
-use std::path::PathBuf;
+use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 mod config;
@@ -11,122 +10,220 @@ mod registry;
 mod server;
 
 #[derive(Parser, Debug)]
-#[command(name = "zo-tunnel-server", about = "Zo Tunnel tunnel server — run on your VPS")]
+#[command(
+    name = "zo-tunnel-server",
+    about = "Zo Tunnel server — expose local services to the internet through your VPS",
+    version
+)]
 struct Cli {
-    /// Path to YAML config file
-    #[arg(long, short, env = "ZO_CONFIG")]
-    config: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Command,
+}
 
-    /// Port for client control connections
-    #[arg(long, env = "ZO_CONTROL_PORT")]
-    control_port: Option<u16>,
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Initial setup — configure tokens and ports.
+    /// Saves config to /etc/zo-tunnel/server.yaml (or ~/.config/zo-tunnel/).
+    Setup(SetupArgs),
 
-    /// Port for public traffic
-    #[arg(long, env = "ZO_PUBLIC_PORT")]
-    public_port: Option<u16>,
+    /// Start the tunnel server using saved config.
+    Start,
 
-    /// Port for dashboard
-    #[arg(long, env = "ZO_DASHBOARD_PORT")]
-    dashboard_port: Option<u16>,
+    /// Show current server configuration and status.
+    Status,
+}
 
-    /// Required token(s) for client authentication (comma-separated)
-    #[arg(long, env = "ZO_TOKEN")]
+#[derive(Parser, Debug)]
+struct SetupArgs {
+    /// Base domain for subdomain routing (e.g. tunnel.zobite.com).
+    /// Each client will be accessible at <client_id>.<domain>.
+    #[arg(long)]
+    domain: String,
+
+    /// Authentication token for tunnel clients.
+    /// If omitted, a secure random token is auto-generated.
+    #[arg(long)]
     token: Option<String>,
 
-    /// Routing mode: path or subdomain
-    #[arg(long, env = "ZO_ROUTING_MODE")]
-    routing_mode: Option<String>,
-
-    /// Domain for subdomain routing (e.g. example.com)
-    #[arg(long, env = "ZO_DOMAIN")]
-    domain: Option<String>,
-
-    /// TLS certificate file
-    #[arg(long, env = "ZO_TLS_CERT")]
-    tls_cert: Option<String>,
-
-    /// TLS private key file
-    #[arg(long, env = "ZO_TLS_KEY")]
-    tls_key: Option<String>,
-
-    /// Dashboard admin token (if set, dashboard requires authentication)
-    #[arg(long, env = "ZO_DASHBOARD_TOKEN")]
+    /// Dashboard admin token.
+    /// If omitted, a secure random token is auto-generated.
+    #[arg(long)]
     dashboard_token: Option<String>,
 
-    /// Dashboard session TTL in seconds (default: 86400 = 24h)
-    #[arg(long, env = "ZO_SESSION_TTL")]
-    session_ttl: Option<u64>,
+    /// Port for client control connections (default: 6200)
+    #[arg(long, default_value_t = 6200)]
+    control_port: u16,
+
+    /// Port for public HTTP traffic (default: 6210)
+    #[arg(long, default_value_t = 6210)]
+    public_port: u16,
+
+    /// TLS certificate file (PEM)
+    #[arg(long)]
+    tls_cert: Option<String>,
+
+    /// TLS private key file (PEM)
+    #[arg(long)]
+    tls_key: Option<String>,
+
+    /// Overwrite existing config without asking
+    #[arg(long)]
+    force: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Init tracing
+    let cli = Cli::parse();
+
+    match cli.command {
+        Command::Setup(args) => cmd_setup(args),
+        Command::Start => cmd_start().await,
+        Command::Status => cmd_status(),
+    }
+}
+
+/// `zo-tunnel-server setup` — generate config and save to disk.
+fn cmd_setup(args: SetupArgs) -> Result<()> {
+    // Check for existing config
+    let config_path = config::ServerConfig::config_path();
+    if config_path.exists() && !args.force {
+        eprintln!("⚠️  Config already exists at: {}", config_path.display());
+        eprintln!("   Use --force to overwrite.");
+        std::process::exit(1);
+    }
+
+    // Generate or use provided tokens
+    let client_token = args
+        .token
+        .unwrap_or_else(|| config::ServerConfig::generate_token(24));
+
+    let dashboard_token = args
+        .dashboard_token
+        .unwrap_or_else(|| config::ServerConfig::generate_token(16));
+
+    // Build config
+    let mut cfg = config::ServerConfig {
+        domain: args.domain,
+        control_port: args.control_port,
+        public_port: args.public_port,
+        ..Default::default()
+    };
+    cfg.auth.tokens = vec![client_token.clone()];
+    cfg.dashboard_auth.token = dashboard_token.clone();
+
+    // TLS
+    if let Some(ref cert) = args.tls_cert {
+        cfg.tls.enabled = true;
+        cfg.tls.cert = cert.clone();
+    }
+    if let Some(ref key) = args.tls_key {
+        cfg.tls.key = key.clone();
+    }
+
+    // Save
+    let saved_path = cfg.save().context("save config")?;
+
+    // Print summary
+    println!();
+    println!("╔══════════════════════════════════════╗");
+    println!("║     Zo Tunnel Server — Setup Done    ║");
+    println!("╚══════════════════════════════════════╝");
+    println!();
+    println!("  Config saved to: {}", saved_path.display());
+    println!();
+    println!("  Domain:          *.{}", cfg.domain);
+    println!("  Control port:    {}", cfg.control_port);
+    println!("  Public port:     {}", cfg.public_port);
+    println!("  Dashboard:       dashboard.{}", cfg.domain);
+    println!("  TLS:             {}", if cfg.tls.enabled { "enabled" } else { "disabled" });
+    println!();
+    println!("  🔑 Client token:     {}", client_token);
+    println!("  🔑 Dashboard token:  {}", dashboard_token);
+    println!();
+    println!("  ▸ Start server:  zo-tunnel-server start");
+    println!("  ▸ Connect client:");
+    println!("    zo-tunnel-client --server <VPS_IP>:{} \\", cfg.control_port);
+    println!("      --id my-api --local localhost:3000 \\");
+    println!("      --token {}", client_token);
+    println!();
+    println!("  ▸ Access tunnel:    http://my-api.{}", cfg.domain);
+    println!("  ▸ Dashboard:        http://dashboard.{}", cfg.domain);
+    println!();
+    println!("  ▸ DNS setup (required):");
+    println!("    Add a wildcard A record: *.{} → <VPS_IP>", cfg.domain);
+    println!();
+
+    Ok(())
+}
+
+/// `zo-tunnel-server start` — load saved config and run server.
+async fn cmd_start() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
-    let cli = Cli::parse();
+    let config_path = config::ServerConfig::resolve_config_path()
+        .unwrap_or_else(config::ServerConfig::config_path);
 
-    // Load config: file → CLI overrides
-    let mut cfg = if let Some(ref path) = cli.config {
-        config::ServerConfig::load(path)
-            .with_context(|| format!("load config from {:?}", path))?
-    } else {
-        config::ServerConfig::default()
-    };
-
-    // Apply CLI overrides
-    if let Some(p) = cli.control_port {
-        cfg.control_port = p;
-    }
-    if let Some(p) = cli.public_port {
-        cfg.public_port = p;
-    }
-    if let Some(p) = cli.dashboard_port {
-        cfg.dashboard_port = p;
-    }
-    if let Some(ref t) = cli.token {
-        cfg.auth.tokens = t.split(',').map(|s| s.trim().to_string()).collect();
-    }
-    if let Some(ref mode) = cli.routing_mode {
-        cfg.routing_mode = match mode.as_str() {
-            "subdomain" => config::RoutingMode::Subdomain,
-            _ => config::RoutingMode::Path,
-        };
-    }
-    if let Some(ref d) = cli.domain {
-        cfg.domain = Some(d.clone());
-    }
-    if let Some(ref cert) = cli.tls_cert {
-        cfg.tls.enabled = true;
-        cfg.tls.cert = cert.clone();
-    }
-    if let Some(ref key) = cli.tls_key {
-        cfg.tls.key = key.clone();
-    }
-    if let Some(ref dt) = cli.dashboard_token {
-        cfg.dashboard_auth.token = dt.clone();
-    }
-    if let Some(ttl) = cli.session_ttl {
-        cfg.dashboard_auth.session_ttl_secs = ttl;
-    }
+    let cfg = config::ServerConfig::load(&config_path)
+        .context("load config")?;
 
     tracing::info!("╔══════════════════════════════════════╗");
     tracing::info!("║          Zo Tunnel Server v{}         ║", env!("CARGO_PKG_VERSION"));
     tracing::info!("╚══════════════════════════════════════╝");
+
     tracing::info!(
-        "Control:{} | Public:{} | Dashboard:{} | Routing:{:?} | TLS:{}",
-        cfg.control_port,
-        cfg.public_port,
-        cfg.dashboard_port,
-        cfg.routing_mode,
-        cfg.tls.enabled,
+        "Domain:*.{} | Control:{} | Public:{} | TLS:{}",
+        cfg.domain, cfg.control_port, cfg.public_port, cfg.tls.enabled,
     );
+    tracing::info!("Config: {}", config_path.display());
 
     let srv = server::Server::new(cfg);
     srv.run().await.context("server run failed")?;
+
+    Ok(())
+}
+
+/// `zo-tunnel-server status` — show current config.
+fn cmd_status() -> Result<()> {
+    let config_path = match config::ServerConfig::resolve_config_path() {
+        Some(p) => p,
+        None => {
+            println!("❌ No config found.");
+            println!("   Run `zo-tunnel-server setup --domain <domain>` first.");
+            return Ok(());
+        }
+    };
+
+    let cfg = config::ServerConfig::load(&config_path)
+        .context("load config")?;
+
+    println!();
+    println!("╔══════════════════════════════════════╗");
+    println!("║    Zo Tunnel Server — Status         ║");
+    println!("╚══════════════════════════════════════╝");
+    println!();
+    println!("  Config:          {}", config_path.display());
+    println!("  Domain:          *.{}", cfg.domain);
+    println!("  Control port:    {}", cfg.control_port);
+    println!("  Public port:     {}", cfg.public_port);
+    println!("  Dashboard:       dashboard.{}", cfg.domain);
+    println!("  TLS:             {}", if cfg.tls.enabled { "enabled" } else { "disabled" });
+    println!("  Client tokens:   {} configured", cfg.auth.tokens.len());
+    println!("  Dashboard auth:  {}", if cfg.dashboard_auth_enabled() { "enabled" } else { "disabled" });
+    println!();
+
+    for (i, token) in cfg.auth.tokens.iter().enumerate() {
+        let masked = if token.len() > 8 {
+            format!("{}...{}", &token[..4], &token[token.len()-4..])
+        } else {
+            "****".into()
+        };
+        println!("  Token #{}: {}", i + 1, masked);
+    }
+    println!();
 
     Ok(())
 }

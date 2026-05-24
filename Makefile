@@ -23,11 +23,11 @@ test-e2e: build-all
 
 # ── Run (dev) ──────────────────────────────────────────
 
+setup-server:
+	RUST_LOG=info cargo run -p zo-tunnel-server -- setup
+
 run-server:
-	RUST_LOG=info cargo run -p zo-tunnel-server -- \
-		--control-port 6200 \
-		--public-port 6210 \
-		--dashboard-port 6220
+	RUST_LOG=info cargo run -p zo-tunnel-server -- start
 
 run-client:
 	RUST_LOG=info cargo run -p zo-tunnel-client -- \

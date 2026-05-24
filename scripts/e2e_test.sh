@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# E2E test for Zo Tunnel — tests HTTP mode + TCP mode
+# E2E test for Zo Tunnel — tests subdomain HTTP routing
 # Tests: local HTTP server → zo-tunnel-client → zo-tunnel-server → curl
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -12,10 +12,10 @@ CLIENT_BIN="$PROJECT_DIR/target/release/zo-tunnel-client"
 
 CONTROL_PORT=16200
 PUBLIC_PORT=16210
-DASHBOARD_PORT=16220
 LOCAL_PORT=13000
 LOCAL_PORT2=13001
 TOKEN="test_secret_42"
+DOMAIN="test.localhost"
 
 cleanup() {
     echo "🧹 Cleaning up..."
@@ -41,92 +41,84 @@ curl -s http://127.0.0.1:$LOCAL_PORT/ >/dev/null || { echo "❌ HTTP server 1 fa
 curl -s http://127.0.0.1:$LOCAL_PORT2/ >/dev/null || { echo "❌ HTTP server 2 failed"; exit 1; }
 echo "   ✅ Local HTTP servers running (port $LOCAL_PORT, $LOCAL_PORT2)"
 
-# 2. Start Zo Tunnel server
-echo "2️⃣  Starting zo-tunnel-server..."
-RUST_LOG=info $SERVER_BIN \
+# 2. Setup and start Zo Tunnel server
+echo "2️⃣  Setting up zo-tunnel-server..."
+$SERVER_BIN setup \
+    --domain $DOMAIN \
     --control-port $CONTROL_PORT \
     --public-port $PUBLIC_PORT \
-    --dashboard-port $DASHBOARD_PORT \
-    --token "$TOKEN" 2>&1 | sed 's/^/   [server] /' &
+    --token "$TOKEN" \
+    --force 2>&1 | sed 's/^/   [setup] /'
+
+echo "   ✅ Config generated"
+
+echo "   Starting zo-tunnel-server..."
+RUST_LOG=info $SERVER_BIN start 2>&1 | sed 's/^/   [server] /' &
 SERVER_PID=$!
 sleep 2
 
 echo "   ✅ Server started"
 
-# 3. Start HTTP mode client
-echo "3️⃣  Starting zo-tunnel-client (HTTP mode, id=test-app)..."
+# 3. Start first client
+echo "3️⃣  Starting zo-tunnel-client (id=test-app)..."
 RUST_LOG=info $CLIENT_BIN \
     --server 127.0.0.1:$CONTROL_PORT \
     --local 127.0.0.1:$LOCAL_PORT \
     --id test-app \
-    --token "$TOKEN" 2>&1 | sed 's/^/   [http-client] /' &
+    --token "$TOKEN" 2>&1 | sed 's/^/   [client-1] /' &
 CLIENT_PID=$!
 sleep 2
 
-echo "   ✅ HTTP client started"
+echo "   ✅ Client 'test-app' started"
 
-# 4. Start TCP mode client
-echo "4️⃣  Starting zo-tunnel-client (TCP mode, id=tcp-app)..."
+# 4. Start second client
+echo "4️⃣  Starting zo-tunnel-client (id=api-app)..."
 RUST_LOG=info $CLIENT_BIN \
     --server 127.0.0.1:$CONTROL_PORT \
     --local 127.0.0.1:$LOCAL_PORT2 \
-    --id tcp-app \
-    --token "$TOKEN" \
-    --tcp 2>&1 | sed 's/^/   [tcp-client] /' &
+    --id api-app \
+    --token "$TOKEN" 2>&1 | sed 's/^/   [client-2] /' &
 CLIENT2_PID=$!
 sleep 2
 
-echo "   ✅ TCP client started"
+echo "   ✅ Client 'api-app' started"
 
-# 5. Test HTTP tunnel (path-based routing: /test-app/)
+# 5. Test subdomain routing — client 1
 echo ""
-echo "5️⃣  Testing HTTP tunnel: curl http://127.0.0.1:$PUBLIC_PORT/test-app/"
+echo "5️⃣  Testing subdomain routing: Host=test-app.$DOMAIN"
 echo "────────────────────────────────────────"
-RESPONSE=$(curl -s --max-time 10 http://127.0.0.1:$PUBLIC_PORT/test-app/ 2>&1 || echo "CURL_FAILED")
+RESPONSE=$(curl -s --max-time 10 -H "Host: test-app.$DOMAIN" http://127.0.0.1:$PUBLIC_PORT/ 2>&1 || echo "CURL_FAILED")
 
-if echo "$RESPONSE" | grep -qi "PLAN.md\|Cargo.toml\|Directory listing\|<!DOCTYPE"; then
-    echo "   ✅ HTTP TUNNEL WORKS! Got response through tunnel"
+if echo "$RESPONSE" | grep -qi "Cargo.toml\|Directory listing\|<!DOCTYPE"; then
+    echo "   ✅ SUBDOMAIN ROUTING WORKS (test-app)!"
     echo ""
     echo "   Response preview:"
     echo "$RESPONSE" | head -3 | sed 's/^/   │ /'
 else
-    echo "   ❌ HTTP TUNNEL FAILED"
+    echo "   ❌ SUBDOMAIN ROUTING FAILED (test-app)"
     echo "   Response: $RESPONSE"
 fi
 
-# 6. Find allocated TCP port from dashboard
+# 6. Test subdomain routing — client 2
 echo ""
-echo "6️⃣  Finding allocated TCP port for tcp-app..."
-CLIENTS_RESPONSE=$(curl -s --max-time 5 http://127.0.0.1:$DASHBOARD_PORT/api/clients 2>&1 || echo "CURL_FAILED")
-TCP_PORT=$(echo "$CLIENTS_RESPONSE" | python3 -c "import sys,json;clients=json.load(sys.stdin);port=[c['tcp_port'] for c in clients if c['client_id']=='tcp-app'][0];print(port)" 2>/dev/null || echo "")
+echo "6️⃣  Testing subdomain routing: Host=api-app.$DOMAIN"
+echo "────────────────────────────────────────"
+RESPONSE2=$(curl -s --max-time 10 -H "Host: api-app.$DOMAIN" http://127.0.0.1:$PUBLIC_PORT/ 2>&1 || echo "CURL_FAILED")
 
-if [ -n "$TCP_PORT" ] && [ "$TCP_PORT" != "None" ] && [ "$TCP_PORT" != "null" ]; then
-    echo "   ✅ TCP port allocated: $TCP_PORT"
-
-    # 7. Test TCP tunnel — connect to the dedicated port
+if echo "$RESPONSE2" | grep -qi "e2e_test\|build.sh\|install.sh\|Directory listing\|<!DOCTYPE"; then
+    echo "   ✅ SUBDOMAIN ROUTING WORKS (api-app)!"
     echo ""
-    echo "7️⃣  Testing TCP tunnel: curl http://127.0.0.1:$TCP_PORT/"
-    echo "────────────────────────────────────────"
-    TCP_RESPONSE=$(curl -s --max-time 10 http://127.0.0.1:$TCP_PORT/ 2>&1 || echo "CURL_FAILED")
-
-    if echo "$TCP_RESPONSE" | grep -qi "e2e_test\|build.sh\|install.sh\|Directory listing\|<!DOCTYPE"; then
-        echo "   ✅ TCP TUNNEL WORKS! Got response through raw TCP tunnel"
-        echo ""
-        echo "   Response preview:"
-        echo "$TCP_RESPONSE" | head -3 | sed 's/^/   │ /'
-    else
-        echo "   ❌ TCP TUNNEL FAILED"
-        echo "   Response: $TCP_RESPONSE"
-    fi
+    echo "   Response preview:"
+    echo "$RESPONSE2" | head -3 | sed 's/^/   │ /'
 else
-    echo "   ❌ Could not find TCP port for tcp-app"
-    echo "   Clients: $CLIENTS_RESPONSE"
+    echo "   ❌ SUBDOMAIN ROUTING FAILED (api-app)"
+    echo "   Response: $RESPONSE2"
 fi
 
-# 8. Test dashboard API
+# 7. Test dashboard API
 echo ""
-echo "8️⃣  Testing dashboard API..."
-DASH_RESPONSE=$(curl -s --max-time 5 http://127.0.0.1:$DASHBOARD_PORT/api/status 2>&1 || echo "CURL_FAILED")
+echo "7️⃣  Testing dashboard API..."
+DASH_RESPONSE=$(curl -s --max-time 5 -H "Host: dashboard.$DOMAIN" http://127.0.0.1:$PUBLIC_PORT/api/status 2>&1 || echo "CURL_FAILED")
 
 if echo "$DASH_RESPONSE" | grep -q "running"; then
     echo "   ✅ Dashboard: $DASH_RESPONSE"
@@ -134,17 +126,18 @@ else
     echo "   ❌ Dashboard failed: $DASH_RESPONSE"
 fi
 
-# 9. Verify both clients show in clients API
+# 8. Verify both clients show in clients API
 echo ""
-echo "9️⃣  Verifying both clients..."
-if echo "$CLIENTS_RESPONSE" | grep -q "test-app" && echo "$CLIENTS_RESPONSE" | grep -q "tcp-app"; then
+echo "8️⃣  Verifying both clients..."
+CLIENTS_RESPONSE=$(curl -s --max-time 5 -H "Host: dashboard.$DOMAIN" http://127.0.0.1:$PUBLIC_PORT/api/clients 2>&1 || echo "CURL_FAILED")
+
+if echo "$CLIENTS_RESPONSE" | grep -q "test-app" && echo "$CLIENTS_RESPONSE" | grep -q "api-app"; then
     echo "   ✅ Both clients registered!"
     echo "   $CLIENTS_RESPONSE" | python3 -c "
 import sys, json
 clients = json.load(sys.stdin)
 for c in clients:
-    mode = f'TCP:{c[\"tcp_port\"]}' if c.get('tcp_port') else 'HTTP'
-    print(f'   │ {c[\"client_id\"]:12} → {mode:10} | requests: {c[\"total_requests\"]}')
+    print(f'   │ {c[\"client_id\"]:12} | requests: {c[\"total_requests\"]}')
 " 2>/dev/null || echo "   $CLIENTS_RESPONSE"
 else
     echo "   ⚠️  Clients: $CLIENTS_RESPONSE"

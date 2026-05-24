@@ -1,13 +1,22 @@
-# Zo Tunnel Client Configuration
-server: "vps-ip:6200"
-client_id: "my-webapp"
-local_addr: "localhost:3000"
-token: "token_abc123"
+# Zo Tunnel Client Configuration (example)
+#
+# Usage:
+#   zo-tunnel-client --config client.yaml
+#
+# Or use CLI flags directly:
+#   zo-tunnel-client --server vps:6200 --local localhost:3000 --id my-api --token YOUR_TOKEN
 
-# Set to true for raw TCP forwarding (SSH, databases)
-# The server will allocate a dedicated public TCP port
-tcp_mode: false
+server: "vps-ip:6200"              # Server address (host:port)
+client_id: "my-webapp"             # Tunnel name — used as identifier
+local_addr: "localhost:3000"       # Local service to forward to
+token: "your-token"                # Auth token (from server setup)
 
 reconnect:
-  enabled: true
-  max_interval: 30            # Max seconds between reconnect attempts
+  enabled: true                    # Auto-reconnect on disconnect
+  max_interval: 30                 # Max seconds between attempts (exponential backoff)
+
+# TLS for the control channel (requires server TLS enabled)
+# tls:
+#   enabled: true
+#   server_name: ""                # SNI name (default: hostname from server)
+#   skip_verify: false             # DANGEROUS: skip cert verification

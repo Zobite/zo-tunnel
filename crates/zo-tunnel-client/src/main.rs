@@ -29,13 +29,21 @@ struct Cli {
     #[arg(long, env = "ZO_TOKEN")]
     token: Option<String>,
 
-    /// Request a dedicated TCP port (for SSH, databases, raw TCP)
-    #[arg(long)]
-    tcp: bool,
-
     /// Disable auto-reconnect
     #[arg(long)]
     no_reconnect: bool,
+
+    /// Enable TLS for the control channel (server must also have TLS enabled)
+    #[arg(long, env = "ZO_TLS")]
+    tls: bool,
+
+    /// Server name for TLS SNI/cert verification (default: hostname from --server)
+    #[arg(long)]
+    tls_server_name: Option<String>,
+
+    /// Skip TLS certificate verification (DANGEROUS — only for self-signed certs)
+    #[arg(long)]
+    tls_skip_verify: bool,
 }
 
 #[tokio::main]
@@ -57,8 +65,8 @@ async fn main() -> Result<()> {
             client_id: "default".into(),
             local_addr: "localhost:3000".into(),
             token: String::new(),
-            tcp_mode: false,
             reconnect: config::ReconnectConfig::default(),
+            tls: config::ClientTlsConfig::default(),
         }
     };
 
@@ -78,8 +86,14 @@ async fn main() -> Result<()> {
     if cli.no_reconnect {
         cfg.reconnect.enabled = false;
     }
-    if cli.tcp {
-        cfg.tcp_mode = true;
+    if cli.tls {
+        cfg.tls.enabled = true;
+    }
+    if let Some(ref name) = cli.tls_server_name {
+        cfg.tls.server_name = name.clone();
+    }
+    if cli.tls_skip_verify {
+        cfg.tls.skip_verify = true;
     }
 
     if cfg.server.is_empty() {
@@ -91,20 +105,24 @@ async fn main() -> Result<()> {
     tracing::info!("║          Zo Tunnel Client v{}         ║", env!("CARGO_PKG_VERSION"));
     tracing::info!("╚══════════════════════════════════════╝");
     tracing::info!(
-        "ID:'{}' | Server:{} | Local:{} | Mode:{} | Reconnect:{}",
+        "ID:'{}' | Server:{} | Local:{} | TLS:{} | Reconnect:{}",
         cfg.client_id,
         cfg.server,
         cfg.local_addr,
-        if cfg.tcp_mode { "TCP" } else { "HTTP" },
+        if cfg.tls.enabled { "yes" } else { "no" },
         cfg.reconnect.enabled
     );
+
+    if cfg.tls.enabled && cfg.tls.skip_verify {
+        tracing::warn!("⚠️  TLS certificate verification DISABLED — insecure!");
+    }
 
     let client = client::Client::new(
         cfg.server.clone(),
         cfg.local_addr.clone(),
         cfg.client_id.clone(),
         cfg.token.clone(),
-        cfg.tcp_mode,
+        cfg.tls.clone(),
     );
 
     // Exponential backoff reconnect loop

@@ -4,22 +4,22 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use subtle::ConstantTimeEq;
 
+/// Reserved subdomains that cannot be used as client IDs.
+pub const RESERVED_SUBDOMAINS: &[&str] = &["dashboard", "connect", "api", "www", "admin"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     #[serde(default = "default_control_port")]
     pub control_port: u16,
 
+    /// Public HTTP port (subdomain routing + dashboard).
     #[serde(default = "default_public_port")]
     pub public_port: u16,
 
-    #[serde(default = "default_dashboard_port")]
-    pub dashboard_port: u16,
-
-    #[serde(default)]
-    pub routing_mode: RoutingMode,
-
-    #[serde(default)]
-    pub domain: Option<String>,
+    /// Base domain for subdomain routing (e.g. "tunnel.zobite.com").
+    /// Each client is accessible at <client_id>.<domain>.
+    /// Dashboard is at dashboard.<domain>.
+    pub domain: String,
 
     #[serde(default)]
     pub tls: TlsConfig,
@@ -33,21 +33,11 @@ pub struct ServerConfig {
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
 
-    /// TCP port range for dedicated per-client TCP forwarding
-    #[serde(default)]
-    pub tcp_ports: TcpPortConfig,
-
     #[serde(default = "default_log_level")]
     pub log_level: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum RoutingMode {
-    #[default]
-    Path,
-    Subdomain,
-}
+
 
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -104,29 +94,6 @@ impl Default for RateLimitConfig {
     }
 }
 
-/// TCP port range configuration for dedicated TCP tunnels.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TcpPortConfig {
-    /// Enable dedicated TCP port allocation
-    #[serde(default)]
-    pub enabled: bool,
-    /// Start of TCP port range (inclusive)
-    #[serde(default = "default_tcp_start")]
-    pub port_start: u16,
-    /// End of TCP port range (inclusive)
-    #[serde(default = "default_tcp_end")]
-    pub port_end: u16,
-}
-
-impl Default for TcpPortConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            port_start: 10000,
-            port_end: 10100,
-        }
-    }
-}
 
 fn default_control_port() -> u16 {
     zo_tunnel_protocol::DEFAULT_CONTROL_PORT
@@ -134,17 +101,8 @@ fn default_control_port() -> u16 {
 fn default_public_port() -> u16 {
     zo_tunnel_protocol::DEFAULT_PUBLIC_PORT
 }
-fn default_dashboard_port() -> u16 {
-    zo_tunnel_protocol::DEFAULT_DASHBOARD_PORT
-}
 fn default_log_level() -> String {
     "info".into()
-}
-fn default_tcp_start() -> u16 {
-    10000
-}
-fn default_tcp_end() -> u16 {
-    10100
 }
 fn default_rps() -> u32 {
     100
@@ -161,25 +119,88 @@ impl Default for ServerConfig {
         Self {
             control_port: default_control_port(),
             public_port: default_public_port(),
-            dashboard_port: default_dashboard_port(),
-            routing_mode: RoutingMode::default(),
-            domain: None,
+            domain: String::new(),
             tls: TlsConfig::default(),
             auth: AuthConfig::default(),
             dashboard_auth: DashboardAuthConfig::default(),
             rate_limit: RateLimitConfig::default(),
-            tcp_ports: TcpPortConfig::default(),
             log_level: default_log_level(),
         }
     }
 }
 
+
+
 impl ServerConfig {
-    /// Load config from YAML file, falling back to defaults.
+    /// Config directory for saving (used by `setup`).
+    /// - `/etc/zo-tunnel/` when running as root
+    /// - `~/.config/zo-tunnel/` otherwise
+    pub fn config_dir() -> std::path::PathBuf {
+        if nix_is_root() {
+            std::path::PathBuf::from("/etc/zo-tunnel")
+        } else {
+            dirs_fallback().join("zo-tunnel")
+        }
+    }
+
+    /// Full path to the server config file (for saving).
+    pub fn config_path() -> std::path::PathBuf {
+        Self::config_dir().join("server.yaml")
+    }
+
+    /// Resolve the config path for loading.
+    /// Checks /etc/zo-tunnel/server.yaml first (system-wide),
+    /// then falls back to ~/.config/zo-tunnel/server.yaml.
+    pub fn resolve_config_path() -> Option<std::path::PathBuf> {
+        let system_path = std::path::PathBuf::from("/etc/zo-tunnel/server.yaml");
+        if system_path.exists() {
+            return Some(system_path);
+        }
+        let user_path = dirs_fallback().join("zo-tunnel").join("server.yaml");
+        if user_path.exists() {
+            return Some(user_path);
+        }
+        None
+    }
+
+    /// Load config from a specific YAML file.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let config: ServerConfig = serde_yaml::from_str(&content)?;
         Ok(config)
+    }
+
+    /// Save config to the system config path.
+    pub fn save(&self) -> anyhow::Result<std::path::PathBuf> {
+        let dir = Self::config_dir();
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| anyhow::anyhow!("Failed to create config dir {}: {}", dir.display(), e))?;
+
+        let path = Self::config_path();
+        let yaml = serde_yaml::to_string(self)?;
+
+        // Add a header comment
+        let content = format!(
+            "# Zo Tunnel Server Configuration\n\
+             # Generated by: zo-tunnel-server setup\n\
+             # Config path: {}\n\
+             #\n\
+             # To reconfigure, run: zo-tunnel-server setup --domain YOUR_DOMAIN [OPTIONS]\n\
+             \n{}", 
+            path.display(), yaml
+        );
+
+        std::fs::write(&path, content)
+            .map_err(|e| anyhow::anyhow!("Failed to write config to {}: {}", path.display(), e))?;
+
+        Ok(path)
+    }
+
+    /// Generate a cryptographically secure random hex token.
+    pub fn generate_token(len_bytes: usize) -> String {
+        let mut buf = vec![0u8; len_bytes];
+        getrandom::getrandom(&mut buf).expect("getrandom failed");
+        buf.iter().map(|b| format!("{:02x}", b)).collect()
     }
 
     /// Check if a token is valid. If no tokens configured, all are accepted.
@@ -207,6 +228,26 @@ impl ServerConfig {
     }
 }
 
+/// Check if running as root (uid 0).
+fn nix_is_root() -> bool {
+    unsafe { libc_geteuid() == 0 }
+}
+
+extern "C" {
+    #[link_name = "geteuid"]
+    fn libc_geteuid() -> u32;
+}
+
+/// Fallback config dir: ~/.config/
+fn dirs_fallback() -> std::path::PathBuf {
+    std::env::var("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            std::path::PathBuf::from(home).join(".config")
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,8 +257,7 @@ mod tests {
         let cfg = ServerConfig::default();
         assert_eq!(cfg.control_port, 6200);
         assert_eq!(cfg.public_port, 6210);
-        assert_eq!(cfg.dashboard_port, 6220);
-        assert_eq!(cfg.routing_mode, RoutingMode::Path);
+        assert!(cfg.domain.is_empty());
         assert!(!cfg.tls.enabled);
         assert!(cfg.auth.tokens.is_empty());
         assert!(cfg.dashboard_auth.token.is_empty());
@@ -247,7 +287,7 @@ mod tests {
         let yaml = r#"
 control_port: 7777
 public_port: 8888
-dashboard_port: 9999
+domain: "test.example.com"
 auth:
   tokens:
     - "tok1"
@@ -256,33 +296,24 @@ auth:
         let cfg: ServerConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.control_port, 7777);
         assert_eq!(cfg.public_port, 8888);
-        assert_eq!(cfg.dashboard_port, 9999);
+        assert_eq!(cfg.domain, "test.example.com");
         assert_eq!(cfg.auth.tokens, vec!["tok1", "tok2"]);
     }
 
     #[test]
     fn test_yaml_defaults_for_missing_fields() {
-        let yaml = "{}";
+        let yaml = r#"domain: "tunnel.example.com""#;
         let cfg: ServerConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.control_port, 6200);
         assert_eq!(cfg.public_port, 6210);
-        assert_eq!(cfg.dashboard_port, 6220);
+        assert_eq!(cfg.domain, "tunnel.example.com");
         assert_eq!(cfg.log_level, "info");
-    }
-
-    #[test]
-    fn test_tcp_port_config_defaults() {
-        let cfg = TcpPortConfig::default();
-        assert!(cfg.enabled);
-        assert_eq!(cfg.port_start, 10000);
-        assert_eq!(cfg.port_end, 10100);
     }
 
     #[test]
     fn test_dashboard_auth_disabled_by_default() {
         let cfg = ServerConfig::default();
         assert!(!cfg.dashboard_auth_enabled());
-        // When no token is configured, all tokens are accepted
         assert!(cfg.validate_dashboard_token("anything"));
     }
 
@@ -294,7 +325,6 @@ auth:
         assert!(cfg.validate_dashboard_token("super-secret-admin"));
         assert!(!cfg.validate_dashboard_token("wrong-token"));
         assert!(!cfg.validate_dashboard_token(""));
-        // Different length should also fail
         assert!(!cfg.validate_dashboard_token("super-secret-admin-extra"));
         assert!(!cfg.validate_dashboard_token("super"));
     }
@@ -302,6 +332,7 @@ auth:
     #[test]
     fn test_dashboard_auth_yaml_parsing() {
         let yaml = r#"
+domain: "tunnel.example.com"
 dashboard_auth:
   token: "my-admin-token"
   session_ttl_secs: 3600

@@ -1,6 +1,5 @@
 //! HTTP reverse proxy — routes public requests to the correct tunnel client.
-
-use crate::config::RoutingMode;
+//! Uses subdomain-based routing: <client_id>.<domain> → client_id
 use crate::metrics::{Metrics, RateLimiter};
 use crate::registry::Registry;
 use anyhow::Context;
@@ -12,7 +11,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 
-type BoxBody = http_body_util::combinators::BoxBody<bytes::Bytes, hyper::Error>;
+pub type BoxBody = http_body_util::combinators::BoxBody<bytes::Bytes, hyper::Error>;
 
 
 fn full_body(data: impl Into<bytes::Bytes>) -> BoxBody {
@@ -36,44 +35,29 @@ fn error_response(status: StatusCode, msg: &str) -> Response<BoxBody> {
 }
 
 /// Extract client_id and forwarded path from an HTTP request.
+/// Uses subdomain routing: <client_id>.<domain> → (client_id, original_path)
 fn extract_routing(
     req: &Request<Incoming>,
-    mode: &RoutingMode,
-    domain: Option<&str>,
+    domain: &str,
 ) -> Option<(String, String)> {
-    match mode {
-        RoutingMode::Path => {
-            let path = req.uri().path();
-            // /client_id/rest/of/path → client_id, /rest/of/path
-            let trimmed = path.trim_start_matches('/');
-            let mut parts = trimmed.splitn(2, '/');
-            let client_id = parts.next()?.to_string();
-            if client_id.is_empty() {
-                return None;
-            }
-            let rest = parts.next().unwrap_or("");
-            let forwarded_path = format!("/{}", rest);
-            Some((client_id, forwarded_path))
+    let host = req
+        .headers()
+        .get("host")
+        .and_then(|v| v.to_str().ok())?;
+    // Strip port if present (e.g. "webapp.tunnel.zobite.com:6210" → "webapp.tunnel.zobite.com")
+    let host_no_port = host.split(':').next().unwrap_or(host);
+    let suffix = format!(".{}", domain);
+    if host_no_port.ends_with(&suffix) {
+        let client_id = host_no_port
+            .strip_suffix(&suffix)?
+            .to_string();
+        if client_id.is_empty() {
+            return None;
         }
-        RoutingMode::Subdomain => {
-            let host = req
-                .headers()
-                .get("host")
-                .and_then(|v| v.to_str().ok())?;
-            let domain = domain?;
-            // client_id.domain.com → client_id
-            let host_no_port = host.split(':').next().unwrap_or(host);
-            let suffix = format!(".{}", domain);
-            if host_no_port.ends_with(&suffix) {
-                let client_id = host_no_port
-                    .strip_suffix(&suffix)?
-                    .to_string();
-                let path = req.uri().path().to_string();
-                Some((client_id, path))
-            } else {
-                None
-            }
-        }
+        let path = req.uri().path().to_string();
+        Some((client_id, path))
+    } else {
+        None
     }
 }
 
@@ -116,16 +100,15 @@ pub async fn handle_proxy_request(
     registry: Arc<Registry>,
     metrics: Arc<Metrics>,
     rate_limiter: Arc<RateLimiter>,
-    routing_mode: RoutingMode,
-    domain: Option<String>,
+    domain: String,
 ) -> Result<Response<BoxBody>, hyper::Error> {
     metrics.total_requests.fetch_add(1, Ordering::Relaxed);
 
-    // Extract routing
-    let (client_id, path) = match extract_routing(&req, &routing_mode, domain.as_deref()) {
+    // Extract routing from subdomain
+    let (client_id, path) = match extract_routing(&req, &domain) {
         Some(r) => r,
         None => {
-            // No routing info — list available clients
+            // No valid subdomain — show hint
             let clients = registry.list();
             if clients.is_empty() {
                 return Ok(error_response(
@@ -133,9 +116,11 @@ pub async fn handle_proxy_request(
                     "No tunnel clients connected",
                 ));
             }
-            let client_list: Vec<String> = clients.iter().map(|c| c.client_id.clone()).collect();
+            let client_list: Vec<String> = clients.iter().map(|c| {
+                format!("{}.{}", c.client_id, domain)
+            }).collect();
             let msg = format!(
-                "Available tunnels: {}. Use /<tunnel_name>/your/path to route.",
+                "Invalid subdomain. Available tunnels: {}",
                 client_list.join(", ")
             );
             return Ok(error_response(StatusCode::NOT_FOUND, &msg));
@@ -259,30 +244,19 @@ pub async fn handle_proxy_request(
 #[cfg(test)]
 mod tests {
 
-    /// Pure path-based routing extraction (mirrors extract_routing Path logic).
-    fn extract_path_routing(path: &str) -> Option<(String, String)> {
-        let trimmed = path.trim_start_matches('/');
-        let mut parts = trimmed.splitn(2, '/');
-        let client_id = parts.next()?.to_string();
-        if client_id.is_empty() {
-            return None;
-        }
-        let rest = parts.next().unwrap_or("");
-        let forwarded_path = format!("/{}", rest);
-        Some((client_id, forwarded_path))
-    }
-
-    /// Pure subdomain-based routing extraction (mirrors extract_routing Subdomain logic).
+    /// Pure subdomain-based routing extraction (mirrors extract_routing logic).
     fn extract_subdomain_routing(
         host: &str,
         path: &str,
-        domain: Option<&str>,
+        domain: &str,
     ) -> Option<(String, String)> {
-        let domain = domain?;
         let host_no_port = host.split(':').next().unwrap_or(host);
         let suffix = format!(".{}", domain);
         if host_no_port.ends_with(&suffix) {
             let client_id = host_no_port.strip_suffix(&suffix)?.to_string();
+            if client_id.is_empty() {
+                return None;
+            }
             Some((client_id, path.to_string()))
         } else {
             None
@@ -290,63 +264,39 @@ mod tests {
     }
 
     #[test]
-    fn test_path_routing_basic() {
-        let result = extract_path_routing("/my-app/api/users");
-        assert_eq!(result, Some(("my-app".into(), "/api/users".into())));
-    }
-
-    #[test]
-    fn test_path_routing_root() {
-        let result = extract_path_routing("/my-app/");
-        assert_eq!(result, Some(("my-app".into(), "/".into())));
-    }
-
-    #[test]
-    fn test_path_routing_no_trailing_slash() {
-        let result = extract_path_routing("/my-app");
-        assert_eq!(result, Some(("my-app".into(), "/".into())));
-    }
-
-    #[test]
-    fn test_path_routing_empty() {
-        let result = extract_path_routing("/");
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_path_routing_deep_nested() {
-        let result = extract_path_routing("/webapp/api/v2/users/123");
-        assert_eq!(result, Some(("webapp".into(), "/api/v2/users/123".into())));
-    }
-
-    #[test]
     fn test_subdomain_routing_basic() {
-        let result = extract_subdomain_routing("webapp.example.com", "/api/users", Some("example.com"));
+        let result = extract_subdomain_routing("webapp.tunnel.zobite.com", "/api/users", "tunnel.zobite.com");
         assert_eq!(result, Some(("webapp".into(), "/api/users".into())));
     }
 
     #[test]
     fn test_subdomain_routing_with_port() {
-        let result = extract_subdomain_routing("webapp.example.com:6210", "/", Some("example.com"));
+        let result = extract_subdomain_routing("webapp.tunnel.zobite.com:6210", "/", "tunnel.zobite.com");
         assert_eq!(result, Some(("webapp".into(), "/".into())));
     }
 
     #[test]
     fn test_subdomain_routing_no_match() {
-        let result = extract_subdomain_routing("other.domain.com", "/", Some("example.com"));
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_subdomain_routing_no_domain_configured() {
-        let result = extract_subdomain_routing("webapp.example.com", "/", None);
+        let result = extract_subdomain_routing("other.domain.com", "/", "tunnel.zobite.com");
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_subdomain_exact_domain_no_subdomain() {
-        let result = extract_subdomain_routing("example.com", "/", Some("example.com"));
+        let result = extract_subdomain_routing("tunnel.zobite.com", "/", "tunnel.zobite.com");
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_subdomain_path_preserved() {
+        let result = extract_subdomain_routing("myapp.tunnel.zobite.com", "/dashboard/settings?tab=profile", "tunnel.zobite.com");
+        assert_eq!(result, Some(("myapp".into(), "/dashboard/settings?tab=profile".into())));
+    }
+
+    #[test]
+    fn test_subdomain_deep_path() {
+        let result = extract_subdomain_routing("api.tunnel.zobite.com", "/v2/users/123/posts", "tunnel.zobite.com");
+        assert_eq!(result, Some(("api".into(), "/v2/users/123/posts".into())));
     }
 }
 
