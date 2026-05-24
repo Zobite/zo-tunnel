@@ -57,11 +57,12 @@ async function refresh() {
         // Clients table
         const tbody = document.getElementById('clients-body');
         if (clients.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="empty">No clients connected</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="empty">No clients connected</td></tr>';
         } else {
             tbody.innerHTML = clients.map(c => `
                 <tr>
                     <td class="client-id">${escapeHtml(c.client_id)}</td>
+                    <td>${c.tcp_port ? '<span style="color:var(--orange)">TCP:' + c.tcp_port + '</span>' : '<span style="color:var(--green)">HTTP</span>'}</td>
                     <td>${formatDuration(c.connected_at_secs)} ago</td>
                     <td>${formatNumber(c.total_requests)}</td>
                     <td>${c.active_streams}</td>

@@ -255,3 +255,98 @@ pub async fn handle_proxy_request(
         .boxed();
     Ok(Response::from_parts(parts, boxed))
 }
+
+#[cfg(test)]
+mod tests {
+
+    /// Pure path-based routing extraction (mirrors extract_routing Path logic).
+    fn extract_path_routing(path: &str) -> Option<(String, String)> {
+        let trimmed = path.trim_start_matches('/');
+        let mut parts = trimmed.splitn(2, '/');
+        let client_id = parts.next()?.to_string();
+        if client_id.is_empty() {
+            return None;
+        }
+        let rest = parts.next().unwrap_or("");
+        let forwarded_path = format!("/{}", rest);
+        Some((client_id, forwarded_path))
+    }
+
+    /// Pure subdomain-based routing extraction (mirrors extract_routing Subdomain logic).
+    fn extract_subdomain_routing(
+        host: &str,
+        path: &str,
+        domain: Option<&str>,
+    ) -> Option<(String, String)> {
+        let domain = domain?;
+        let host_no_port = host.split(':').next().unwrap_or(host);
+        let suffix = format!(".{}", domain);
+        if host_no_port.ends_with(&suffix) {
+            let client_id = host_no_port.strip_suffix(&suffix)?.to_string();
+            Some((client_id, path.to_string()))
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    fn test_path_routing_basic() {
+        let result = extract_path_routing("/my-app/api/users");
+        assert_eq!(result, Some(("my-app".into(), "/api/users".into())));
+    }
+
+    #[test]
+    fn test_path_routing_root() {
+        let result = extract_path_routing("/my-app/");
+        assert_eq!(result, Some(("my-app".into(), "/".into())));
+    }
+
+    #[test]
+    fn test_path_routing_no_trailing_slash() {
+        let result = extract_path_routing("/my-app");
+        assert_eq!(result, Some(("my-app".into(), "/".into())));
+    }
+
+    #[test]
+    fn test_path_routing_empty() {
+        let result = extract_path_routing("/");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_path_routing_deep_nested() {
+        let result = extract_path_routing("/webapp/api/v2/users/123");
+        assert_eq!(result, Some(("webapp".into(), "/api/v2/users/123".into())));
+    }
+
+    #[test]
+    fn test_subdomain_routing_basic() {
+        let result = extract_subdomain_routing("webapp.example.com", "/api/users", Some("example.com"));
+        assert_eq!(result, Some(("webapp".into(), "/api/users".into())));
+    }
+
+    #[test]
+    fn test_subdomain_routing_with_port() {
+        let result = extract_subdomain_routing("webapp.example.com:6210", "/", Some("example.com"));
+        assert_eq!(result, Some(("webapp".into(), "/".into())));
+    }
+
+    #[test]
+    fn test_subdomain_routing_no_match() {
+        let result = extract_subdomain_routing("other.domain.com", "/", Some("example.com"));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_subdomain_routing_no_domain_configured() {
+        let result = extract_subdomain_routing("webapp.example.com", "/", None);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_subdomain_exact_domain_no_subdomain() {
+        let result = extract_subdomain_routing("example.com", "/", Some("example.com"));
+        assert_eq!(result, None);
+    }
+}
+

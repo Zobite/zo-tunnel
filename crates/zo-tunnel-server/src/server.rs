@@ -192,7 +192,7 @@ impl Server {
         let met_ctrl = metrics.clone();
         let alloc_ctrl = tcp_allocator.clone();
         let config_ctrl = self.config.clone();
-        let control_task = tokio::spawn(async move {
+        let mut control_task = tokio::spawn(async move {
             Self::accept_clients(control_listener, reg_ctrl, met_ctrl, alloc_ctrl, config_ctrl).await;
         });
 
@@ -203,7 +203,7 @@ impl Server {
         let routing = self.config.routing_mode.clone();
         let domain = self.config.domain.clone();
         let tls_pub = tls_acceptor.clone();
-        let public_task = tokio::spawn(async move {
+        let mut public_task = tokio::spawn(async move {
             Self::accept_public(public_listener, reg_pub, met_pub, rl_pub, routing, domain, tls_pub)
                 .await;
         });
@@ -213,7 +213,7 @@ impl Server {
             registry: registry.clone(),
             metrics: metrics.clone(),
         };
-        let dashboard_task = tokio::spawn(async move {
+        let mut dashboard_task = tokio::spawn(async move {
             let app = dashboard::create_router(dash_state);
             if let Err(e) = axum::serve(dashboard_listener, app).await {
                 tracing::error!("Dashboard error: {}", e);
@@ -225,18 +225,38 @@ impl Server {
         // ── Wait for shutdown ──
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
-                tracing::info!("🛑 Shutdown signal received");
+                tracing::info!("🛑 Shutdown signal received, cleaning up...");
             }
-            _ = control_task => {
+            _ = &mut control_task => {
                 tracing::error!("Control task ended unexpectedly");
             }
-            _ = public_task => {
+            _ = &mut public_task => {
                 tracing::error!("Public task ended unexpectedly");
             }
-            _ = dashboard_task => {
+            _ = &mut dashboard_task => {
                 tracing::error!("Dashboard task ended unexpectedly");
             }
         }
+
+        // ── Graceful cleanup ──
+        tracing::info!("🧹 Aborting listener tasks...");
+        control_task.abort();
+        public_task.abort();
+        dashboard_task.abort();
+
+        let connected = registry.count();
+        if connected > 0 {
+            tracing::info!("🔌 Disconnecting {} client(s)...", connected);
+        }
+
+        let snap = metrics.snapshot();
+        tracing::info!(
+            "📊 Final stats: {} requests served, {} connections total, uptime {}s",
+            snap.total_requests,
+            snap.total_connections,
+            snap.uptime_secs
+        );
+        tracing::info!("👋 Zo Tunnel Server stopped.");
 
         Ok(())
     }
@@ -308,10 +328,14 @@ impl Server {
         tcp_allocator: Arc<TcpPortAllocator>,
         config: ServerConfig,
     ) -> Result<()> {
-        // ── Auth handshake (before yamux) ──
-        let auth_msg = read_message(&mut stream)
-            .await
-            .context("read auth message")?;
+        // ── Auth handshake (before yamux, with timeout) ──
+        let auth_msg = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            read_message(&mut stream),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("auth timeout: client did not send AuthReq within 10s"))?
+        .context("read auth message")?;
 
         let (client_id, tcp_mode) = match auth_msg {
             Message::AuthReq(auth) => {
@@ -489,9 +513,10 @@ impl Server {
 
             let handle = yamux_handle.clone();
             let cid = client_id.clone();
+            let met = metrics.clone();
 
             tokio::spawn(async move {
-                if let Err(e) = Self::handle_tcp_connection(tcp_stream, handle, &cid).await {
+                if let Err(e) = Self::handle_tcp_connection(tcp_stream, handle, &cid, met).await {
                     tracing::debug!("TCP tunnel stream error for '{}': {}", cid, e);
                 }
             });
@@ -503,6 +528,7 @@ impl Server {
         mut tcp_stream: tokio::net::TcpStream,
         yamux_handle: YamuxHandle,
         client_id: &str,
+        metrics: Arc<Metrics>,
     ) -> Result<()> {
         // Open yamux stream to client
         let yamux_stream = yamux_handle
@@ -516,6 +542,8 @@ impl Server {
         // Bidirectional pipe: public TCP ↔ yamux ↔ client ↔ local service
         match tokio::io::copy_bidirectional(&mut tcp_stream, &mut compat_stream).await {
             Ok((up, down)) => {
+                metrics.total_bytes_in.fetch_add(up, Ordering::Relaxed);
+                metrics.total_bytes_out.fetch_add(down, Ordering::Relaxed);
                 tracing::debug!("TCP stream for '{}' done: ↑{}B ↓{}B", client_id, up, down);
             }
             Err(e) => {

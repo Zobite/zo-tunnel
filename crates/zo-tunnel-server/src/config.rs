@@ -162,3 +162,73 @@ impl ServerConfig {
         self.auth.tokens.iter().any(|t| t == token)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let cfg = ServerConfig::default();
+        assert_eq!(cfg.control_port, 6200);
+        assert_eq!(cfg.public_port, 6210);
+        assert_eq!(cfg.dashboard_port, 6220);
+        assert_eq!(cfg.routing_mode, RoutingMode::Path);
+        assert!(!cfg.tls.enabled);
+        assert!(cfg.auth.tokens.is_empty());
+    }
+
+    #[test]
+    fn test_validate_token_empty_allows_all() {
+        let cfg = ServerConfig::default();
+        assert!(cfg.validate_token("anything"));
+        assert!(cfg.validate_token(""));
+    }
+
+    #[test]
+    fn test_validate_token_checks_list() {
+        let mut cfg = ServerConfig::default();
+        cfg.auth.tokens = vec!["secret1".into(), "secret2".into()];
+
+        assert!(cfg.validate_token("secret1"));
+        assert!(cfg.validate_token("secret2"));
+        assert!(!cfg.validate_token("wrong"));
+        assert!(!cfg.validate_token(""));
+    }
+
+    #[test]
+    fn test_yaml_parsing() {
+        let yaml = r#"
+control_port: 7777
+public_port: 8888
+dashboard_port: 9999
+auth:
+  tokens:
+    - "tok1"
+    - "tok2"
+"#;
+        let cfg: ServerConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.control_port, 7777);
+        assert_eq!(cfg.public_port, 8888);
+        assert_eq!(cfg.dashboard_port, 9999);
+        assert_eq!(cfg.auth.tokens, vec!["tok1", "tok2"]);
+    }
+
+    #[test]
+    fn test_yaml_defaults_for_missing_fields() {
+        let yaml = "{}";
+        let cfg: ServerConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.control_port, 6200);
+        assert_eq!(cfg.public_port, 6210);
+        assert_eq!(cfg.dashboard_port, 6220);
+        assert_eq!(cfg.log_level, "info");
+    }
+
+    #[test]
+    fn test_tcp_port_config_defaults() {
+        let cfg = TcpPortConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.port_start, 10000);
+        assert_eq!(cfg.port_end, 10100);
+    }
+}

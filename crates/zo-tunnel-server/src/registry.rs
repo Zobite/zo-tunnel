@@ -60,16 +60,15 @@ impl Registry {
         }
     }
 
-    /// Register a new client.
+    /// Register a new client. Returns error if client_id already exists.
     pub fn register(
         &self,
         client_id: String,
         handle: YamuxHandle,
         tcp_port: Option<u16>,
     ) -> anyhow::Result<Arc<ClientEntry>> {
-        if self.clients.contains_key(&client_id) {
-            anyhow::bail!("Client '{}' already registered", client_id);
-        }
+        use dashmap::mapref::entry::Entry;
+
         let entry = Arc::new(ClientEntry {
             client_id: client_id.clone(),
             handle,
@@ -77,8 +76,16 @@ impl Registry {
             metrics: ClientMetrics::new(),
             tcp_port,
         });
-        self.clients.insert(client_id, entry.clone());
-        Ok(entry)
+
+        match self.clients.entry(client_id.clone()) {
+            Entry::Occupied(_) => {
+                anyhow::bail!("Client '{}' already registered", client_id);
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(entry.clone());
+                Ok(entry)
+            }
+        }
     }
 
     /// Unregister a client.

@@ -93,3 +93,42 @@ impl RateLimiter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rate_limiter_disabled() {
+        let rl = RateLimiter::new(0);
+        // When max_per_second is 0, all requests are allowed
+        for _ in 0..1000 {
+            assert!(rl.check("test"));
+        }
+    }
+
+    #[test]
+    fn test_rate_limiter_basic() {
+        let rl = RateLimiter::new(3);
+        assert!(rl.check("client-a")); // 1
+        assert!(rl.check("client-a")); // 2
+        assert!(rl.check("client-a")); // 3
+        assert!(!rl.check("client-a")); // 4 → rejected
+
+        // Different key should have its own counter
+        assert!(rl.check("client-b"));
+    }
+
+    #[test]
+    fn test_metrics_snapshot() {
+        let m = Metrics::new();
+        m.total_requests.fetch_add(42, Ordering::Relaxed);
+        m.failed_auth.fetch_add(3, Ordering::Relaxed);
+
+        let snap = m.snapshot();
+        assert_eq!(snap.total_requests, 42);
+        assert_eq!(snap.failed_auth, 3);
+        assert_eq!(snap.active_connections, 0);
+        assert!(snap.uptime_secs < 2); // just created
+    }
+}
