@@ -1,0 +1,13 @@
+# Zobite Tunnel Client Configuration
+server: "vps-ip:7000"
+client_id: "my-webapp"
+local_addr: "localhost:3000"
+token: "token_abc123"
+
+# Set to true for raw TCP forwarding (SSH, databases)
+# The server will allocate a dedicated public TCP port
+tcp_mode: false
+
+reconnect:
+  enabled: true
+  max_interval: 30            # Max seconds between reconnect attempts

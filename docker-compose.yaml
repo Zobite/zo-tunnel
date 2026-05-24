@@ -1,0 +1,23 @@
+# Zobite Tunnel Server — Docker Compose
+# Usage: docker compose up -d
+
+services:
+  zobite-tunnel-server:
+    image: ghcr.io/devlangla/zobite-tunnel-server:latest
+    # Or build locally:
+    # build:
+    #   context: .
+    #   target: server
+    ports:
+      - "7000:7000"             # Control channel (client connections)
+      - "8080:8080"             # Public HTTP proxy
+      - "9000:9000"             # Dashboard UI
+      - "10000-10020:10000-10020"  # TCP tunnel ports
+    environment:
+      - ZOBITE_TOKEN=${ZOBITE_TOKEN:-changeme}
+      - RUST_LOG=info
+    restart: unless-stopped
+    # Optional: mount config file
+    # volumes:
+    #   - ./configs/server.yaml:/etc/zobite-tunnel/server.yaml
+    # command: ["--config", "/etc/zobite-tunnel/server.yaml"]

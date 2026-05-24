@@ -1,0 +1,213 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # ─── Test ───
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace -- -D warnings
+
+  # ─── Build binaries for all platforms ───
+  build:
+    name: Build ${{ matrix.label }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            label: linux-amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            label: linux-arm64
+          - target: x86_64-apple-darwin
+            os: macos-13
+            label: darwin-amd64
+          - target: aarch64-apple-darwin
+            os: macos-14
+            label: darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-compiler (Linux ARM64)
+        if: matrix.label == 'linux-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binaries
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          mkdir -p dist
+
+          # Server binary
+          if [ -f "target/${{ matrix.target }}/release/zobite-tunnel-server" ]; then
+            TAR_NAME="zobite-tunnel-server-${VERSION}-${{ matrix.label }}.tar.gz"
+            tar -czf "dist/${TAR_NAME}" \
+              -C "target/${{ matrix.target }}/release" zobite-tunnel-server
+            echo "server_tar=${TAR_NAME}" >> $GITHUB_ENV
+          fi
+
+          # Client binary
+          if [ -f "target/${{ matrix.target }}/release/zobite-tunnel-client" ]; then
+            TAR_NAME="zobite-tunnel-client-${VERSION}-${{ matrix.label }}.tar.gz"
+            tar -czf "dist/${TAR_NAME}" \
+              -C "target/${{ matrix.target }}/release" zobite-tunnel-client
+            echo "client_tar=${TAR_NAME}" >> $GITHUB_ENV
+          fi
+
+          # Generate SHA256
+          cd dist && sha256sum *.tar.gz > checksums-${{ matrix.label }}.txt || shasum -a 256 *.tar.gz > checksums-${{ matrix.label }}.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.label }}
+          path: dist/*
+
+  # ─── Docker image ───
+  docker:
+    name: Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version
+        id: meta
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: server
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}-server:latest
+            ${{ env.REGISTRY }}/${{ github.repository }}-server:${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── Create GitHub Release ───
+  release:
+    name: GitHub Release
+    needs: [build, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: binaries-*
+          merge-multiple: true
+
+      - name: Merge checksums
+        run: |
+          cd artifacts
+          cat checksums-*.txt | sort > SHA256SUMS.txt
+          rm checksums-*.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            **Mac (Homebrew):**
+            ```bash
+            brew tap ${{ github.repository_owner }}/tap
+            brew install zobite-tunnel
+            ```
+
+            **Linux/Mac (one-liner):**
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | bash
+            ```
+
+            **Docker (server):**
+            ```bash
+            docker run -d -p 7000:7000 -p 8080:8080 -p 9000:9000 \
+              -e ZOBITE_TOKEN=your-token \
+              ${{ env.REGISTRY }}/${{ github.repository }}-server:latest
+            ```
+
+  # ─── Update Homebrew formula ───
+  homebrew:
+    name: Update Homebrew
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: binaries-*
+          merge-multiple: true
+
+      - name: Get SHA256 for Darwin binaries
+        id: shas
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          SHA_ARM=$(shasum -a 256 artifacts/zobite-tunnel-client-${VERSION}-darwin-arm64.tar.gz 2>/dev/null | cut -d' ' -f1 || sha256sum artifacts/zobite-tunnel-client-${VERSION}-darwin-arm64.tar.gz | cut -d' ' -f1)
+          SHA_AMD=$(shasum -a 256 artifacts/zobite-tunnel-client-${VERSION}-darwin-amd64.tar.gz 2>/dev/null | cut -d' ' -f1 || sha256sum artifacts/zobite-tunnel-client-${VERSION}-darwin-amd64.tar.gz | cut -d' ' -f1)
+          echo "sha_arm64=${SHA_ARM}" >> $GITHUB_OUTPUT
+          echo "sha_amd64=${SHA_AMD}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+
+      - name: Update Homebrew formula
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          event-type: update-formula
+          client-payload: |
+            {
+              "version": "${{ steps.shas.outputs.version }}",
+              "sha_arm64": "${{ steps.shas.outputs.sha_arm64 }}",
+              "sha_amd64": "${{ steps.shas.outputs.sha_amd64 }}"
+            }

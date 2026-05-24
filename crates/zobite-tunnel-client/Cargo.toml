@@ -1,0 +1,19 @@
+[package]
+name = "zobite-tunnel-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zobite-tunnel-protocol = { path = "../zobite-tunnel-protocol" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+yamux = { workspace = true }
+futures = { workspace = true }

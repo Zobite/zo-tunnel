@@ -1,0 +1,28 @@
+# Zobite Tunnel Server Configuration
+control_port: 7000
+public_port: 80
+dashboard_port: 9000
+routing_mode: "path"          # "path" or "subdomain"
+domain: ""                    # Required for subdomain mode (e.g. "example.com")
+
+tls:
+  enabled: false
+  cert: ""                    # Path to TLS certificate (PEM)
+  key: ""                     # Path to TLS private key (PEM)
+
+auth:
+  tokens:
+    - "token_abc123"
+    - "token_xyz789"
+
+rate_limit:
+  requests_per_second: 100
+  max_connections_per_client: 50
+
+# Dedicated TCP port range for raw TCP tunnels (SSH, databases, etc.)
+tcp_ports:
+  enabled: true
+  port_start: 10000           # Start of port range (inclusive)
+  port_end: 10100             # End of port range (inclusive)
+
+log_level: "info"

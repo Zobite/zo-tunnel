@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/zobite-tunnel-protocol",
+    "crates/zobite-tunnel-server",
+    "crates/zobite-tunnel-client",
+]
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "macros", "net", "time", "sync", "signal"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+bytes = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive", "env"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+dashmap = "6"
+yamux = "0.13"
+futures = "0.3"
+hyper = { version = "1", features = ["server", "client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+http = "1"
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
