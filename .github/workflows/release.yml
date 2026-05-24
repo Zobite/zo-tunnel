@@ -169,7 +169,7 @@ jobs:
 
             **Docker (server):**
             ```bash
-            docker run -d -p 7000:7000 -p 8080:8080 -p 9000:9000 \
+            docker run -d -p 6200:6200 -p 6210:6210 -p 6220:6220 \
               -e ZO_TOKEN=your-token \
               ${{ env.REGISTRY }}/${{ github.repository }}-server:latest
             ```
