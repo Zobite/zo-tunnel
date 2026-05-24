@@ -10,13 +10,14 @@ set -euo pipefail
 #    1. Chọn version bump (patch/minor/major)
 #    2. Chạy tests + clippy
 #    3. Update version trong tất cả Cargo.toml
-#    4. Build binaries cho linux-amd64 + linux-arm64
+#    4. Build binaries cho linux + macOS (amd64 + arm64)
 #    5. Git commit + tag + push
 #    6. Tạo GitHub Release + upload binaries (dùng gh CLI)
 #
 #  Yêu cầu:
 #    - gh CLI đã auth (gh auth login)
 #    - gcc-aarch64-linux-gnu (tự cài nếu thiếu)
+#    - cargo-zigbuild + zig (tự cài nếu thiếu — dùng cho macOS cross-compile)
 # ═══════════════════════════════════════════════════════════════
 
 REPO="Zobite/zo-tunnel"
@@ -58,17 +59,19 @@ git rev-parse --is-inside-work-tree &>/dev/null || fail "Not a git repo"
 command -v gh &>/dev/null || fail "gh CLI not installed. Run: apt install gh && gh auth login"
 gh auth status &>/dev/null || fail "gh not authenticated. Run: gh auth login"
 
-# ARM64 cross-compiler
+# ARM64 cross-compiler (for Linux ARM64)
 if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
     info "Installing aarch64-linux-gnu-gcc..."
     sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu >/dev/null 2>&1 \
-        || warn "Could not install gcc-aarch64 — ARM64 build will be skipped"
+        || warn "Could not install gcc-aarch64 — Linux ARM64 build will be skipped"
 fi
 
-# Rust ARM64 target
+# Rust targets
 rustup target add aarch64-unknown-linux-gnu 2>/dev/null || true
+rustup target add x86_64-apple-darwin 2>/dev/null || true
+rustup target add aarch64-apple-darwin 2>/dev/null || true
 
-# Cargo config for ARM64 linker
+# Cargo config for Linux ARM64 linker
 mkdir -p "$PROJECT_DIR/.cargo"
 if ! grep -q "aarch64-unknown-linux-gnu" "$PROJECT_DIR/.cargo/config.toml" 2>/dev/null; then
     cat >> "$PROJECT_DIR/.cargo/config.toml" <<'EOF'
@@ -76,6 +79,30 @@ if ! grep -q "aarch64-unknown-linux-gnu" "$PROJECT_DIR/.cargo/config.toml" 2>/de
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
 EOF
+fi
+
+# cargo-zigbuild (for macOS cross-compile from Linux)
+if ! command -v cargo-zigbuild &>/dev/null; then
+    info "Installing cargo-zigbuild..."
+    cargo install cargo-zigbuild || fail "Could not install cargo-zigbuild"
+fi
+
+# zig compiler
+if ! command -v zig &>/dev/null; then
+    info "Installing zig..."
+    ZIG_VERSION="0.13.0"
+    ZIG_ARCH="$(uname -m)"
+    ZIG_URL="https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ZIG_ARCH}-${ZIG_VERSION}.tar.xz"
+    ZIG_DIR="/usr/local/zig"
+
+    TMP_ZIG=$(mktemp -d)
+    curl -sSL "$ZIG_URL" -o "$TMP_ZIG/zig.tar.xz"
+    sudo mkdir -p "$ZIG_DIR"
+    sudo tar -xJf "$TMP_ZIG/zig.tar.xz" -C "$ZIG_DIR" --strip-components=1
+    sudo ln -sf "$ZIG_DIR/zig" /usr/local/bin/zig
+    rm -rf "$TMP_ZIG"
+    command -v zig &>/dev/null || fail "zig installation failed"
+    ok "zig $(zig version) installed"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -153,20 +180,52 @@ header "Step 3/6 — Build Binaries"
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
-TARGETS=(
+# Linux targets: use regular cargo build
+LINUX_TARGETS=(
     "x86_64-unknown-linux-gnu:linux-amd64"
     "aarch64-unknown-linux-gnu:linux-arm64"
 )
+
+# macOS targets: use cargo-zigbuild
+MACOS_TARGETS=(
+    "x86_64-apple-darwin:darwin-amd64"
+    "aarch64-apple-darwin:darwin-arm64"
+)
+
 BINARIES=("zo-tunnel-server" "zo-tunnel-client")
 BUILT_FILES=()
 
-for entry in "${TARGETS[@]}"; do
+# ─── Build Linux targets ───
+for entry in "${LINUX_TARGETS[@]}"; do
     TARGET="${entry%%:*}"
     LABEL="${entry##*:}"
 
-    info "Building ${BOLD}${LABEL}${NC}..."
+    info "Building ${BOLD}${LABEL}${NC} (cargo)..."
 
     if cargo build --release --target "$TARGET" 2>&1; then
+        for binary in "${BINARIES[@]}"; do
+            BIN_PATH="$PROJECT_DIR/target/$TARGET/release/$binary"
+            if [ -f "$BIN_PATH" ]; then
+                TAR_NAME="${binary}-${TAG}-${LABEL}.tar.gz"
+                tar -czf "$DIST_DIR/$TAR_NAME" -C "$(dirname "$BIN_PATH")" "$binary"
+                SIZE=$(du -h "$DIST_DIR/$TAR_NAME" | cut -f1)
+                ok "${TAR_NAME} (${SIZE})"
+                BUILT_FILES+=("$DIST_DIR/$TAR_NAME")
+            fi
+        done
+    else
+        warn "Failed ${LABEL} — skipping"
+    fi
+done
+
+# ─── Build macOS targets (zigbuild) ───
+for entry in "${MACOS_TARGETS[@]}"; do
+    TARGET="${entry%%:*}"
+    LABEL="${entry##*:}"
+
+    info "Building ${BOLD}${LABEL}${NC} (zigbuild)..."
+
+    if cargo zigbuild --release --target "$TARGET" 2>&1; then
         for binary in "${BINARIES[@]}"; do
             BIN_PATH="$PROJECT_DIR/target/$TARGET/release/$binary"
             if [ -f "$BIN_PATH" ]; then
@@ -237,6 +296,10 @@ echo -e "${GREEN}║  🎉 Release ${TAG} complete!                          ║
 echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  🔗 ${CYAN}${RELEASE_URL}${NC}"
+echo ""
+echo -e "  Binaries built:"
+echo -e "    • linux-amd64 + linux-arm64   (cargo)"
+echo -e "    • darwin-amd64 + darwin-arm64 (cargo-zigbuild)"
 echo ""
 echo -e "  Install:"
 echo -e "    ${CYAN}curl -sSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | bash${NC}"
