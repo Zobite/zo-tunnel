@@ -1,6 +1,6 @@
 # Zo Tunnel Server Configuration
 control_port: 6200
-public_port: 80
+public_port: 6210                # Default. Use 80 if you want standard HTTP port (requires root)
 dashboard_port: 6220
 routing_mode: "path"          # "path" or "subdomain"
 domain: ""                    # Required for subdomain mode (e.g. "example.com")
