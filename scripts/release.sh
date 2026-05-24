@@ -116,6 +116,37 @@ info "Bắt đầu release v${NEW_VERSION}..."
 echo ""
 
 # ═══════════════════════════════════════════════════════════════
+#  Pre-flight checks (same as CI)
+# ═══════════════════════════════════════════════════════════════
+info "🔍 Chạy pre-release checks..."
+echo ""
+
+info "[1/3] cargo test --workspace"
+if ! cargo test --workspace --quiet 2>&1; then
+    err "❌ Tests FAILED — hủy release."
+    exit 1
+fi
+ok "Tests passed"
+
+info "[2/3] cargo clippy --workspace -- -D warnings"
+if ! cargo clippy --workspace -- -D warnings 2>&1; then
+    err "❌ Clippy FAILED — hủy release."
+    exit 1
+fi
+ok "Clippy passed"
+
+info "[3/3] cargo build --release"
+if ! cargo build --release --quiet 2>&1; then
+    err "❌ Build FAILED — hủy release."
+    exit 1
+fi
+ok "Release build passed"
+
+echo ""
+info "✅ Tất cả checks passed! Tiếp tục release..."
+echo ""
+
+# ═══════════════════════════════════════════════════════════════
 #  Step 1: Update Cargo.toml versions
 # ═══════════════════════════════════════════════════════════════
 CARGO_FILES=(
