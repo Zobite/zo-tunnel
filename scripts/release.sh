@@ -2,215 +2,281 @@
 set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════════
-#  Zo Tunnel — Release Script
+#  Zo Tunnel — One-Command Release
+#
 #  Usage: ./scripts/release.sh
 #
-#  This script will:
-#    1. Detect the current version from Cargo.toml
-#    2. Let you choose a version bump (patch / minor / major / custom)
-#    3. Update version in all Cargo.toml files + Homebrew formula
-#    4. Commit, tag, and push → triggers GitHub Actions release
+#  Tự động 100%:
+#    1. Chọn version bump (patch/minor/major)
+#    2. Chạy tests + clippy
+#    3. Update version trong tất cả Cargo.toml
+#    4. Build binaries cho linux-amd64 + linux-arm64
+#    5. Git commit + tag + push
+#    6. Tạo GitHub Release + upload binaries
+#
+#  Yêu cầu:
+#    - GITHUB_TOKEN env var (hoặc file /etc/zo-tunnel-github-token)
+#      → https://github.com/settings/tokens (scope: repo)
+#    - gcc-aarch64-linux-gnu (tự cài nếu thiếu)
 # ═══════════════════════════════════════════════════════════════
 
+REPO="Zobite/zo-tunnel"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+DIST_DIR="$PROJECT_DIR/dist"
 
-# ── Colors ──
+# ─── Colors ───
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-info()  { echo -e "${BLUE}ℹ${NC}  $*"; }
-ok()    { echo -e "${GREEN}✅${NC} $*"; }
-warn()  { echo -e "${YELLOW}⚠️${NC}  $*"; }
-err()   { echo -e "${RED}❌${NC} $*" >&2; }
+info()   { echo -e "${BLUE}▸${NC} $*"; }
+ok()     { echo -e "${GREEN}✅${NC} $*"; }
+warn()   { echo -e "${YELLOW}⚠️${NC}  $*"; }
+fail()   { echo -e "${RED}❌${NC} $*"; exit 1; }
+header() { echo -e "\n${BOLD}${CYAN}═══ $* ═══${NC}\n"; }
 
-# ── Check we're in git repo ──
-if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
-    err "Git repository not found in $PROJECT_DIR"
-    exit 1
-fi
+echo ""
+echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║       🚀 Zo Tunnel Release               ║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}"
+echo ""
 
-# ── Check for uncommitted changes ──
-if ! git -C "$PROJECT_DIR" diff --quiet HEAD 2>/dev/null; then
-    warn "There are uncommitted changes. Continue? (y/N)"
-    read -r answer
-    if [[ ! "$answer" =~ ^[Yy]$ ]]; then
-        info "Release cancelled."
-        exit 0
+# ═══════════════════════════════════════════════════════════════
+#  Pre-flight
+# ═══════════════════════════════════════════════════════════════
+
+cd "$PROJECT_DIR"
+
+# Git check
+git rev-parse --is-inside-work-tree &>/dev/null || fail "Not a git repo"
+
+# GitHub token
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    if [ -f /etc/zo-tunnel-github-token ]; then
+        GITHUB_TOKEN=$(cat /etc/zo-tunnel-github-token)
+    else
+        fail "GITHUB_TOKEN not set. Export it or save to /etc/zo-tunnel-github-token"
     fi
 fi
 
-# ── Get current version from first crate Cargo.toml ──
-get_current_version() {
-    grep -m1 '^version' "$PROJECT_DIR/crates/zo-tunnel-server/Cargo.toml" \
-        | sed 's/version = "\(.*\)"/\1/'
-}
-
-CURRENT_VERSION=$(get_current_version)
-if [[ -z "$CURRENT_VERSION" ]]; then
-    err "Unable to read current version from Cargo.toml"
-    exit 1
+# ARM64 cross-compiler
+if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
+    info "Installing aarch64-linux-gnu-gcc..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu >/dev/null 2>&1 \
+        || warn "Could not install gcc-aarch64 — ARM64 build will be skipped"
 fi
 
-# ── Parse semver ──
+# Rust ARM64 target
+rustup target add aarch64-unknown-linux-gnu 2>/dev/null || true
+
+# Cargo config for ARM64 linker
+mkdir -p "$PROJECT_DIR/.cargo"
+if ! grep -q "aarch64-unknown-linux-gnu" "$PROJECT_DIR/.cargo/config.toml" 2>/dev/null; then
+    cat >> "$PROJECT_DIR/.cargo/config.toml" <<'EOF'
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+EOF
+fi
+
+# ═══════════════════════════════════════════════════════════════
+#  Version Selection
+# ═══════════════════════════════════════════════════════════════
+
+CURRENT_VERSION=$(grep -m1 '^version' "$PROJECT_DIR/crates/zo-tunnel-server/Cargo.toml" \
+    | sed 's/version = "\(.*\)"/\1/')
+[ -z "$CURRENT_VERSION" ] && fail "Cannot read version from Cargo.toml"
+
 IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
 
 BUMP_PATCH="$MAJOR.$MINOR.$((PATCH + 1))"
 BUMP_MINOR="$MAJOR.$((MINOR + 1)).0"
 BUMP_MAJOR="$((MAJOR + 1)).0.0"
 
-# ── Display menu ──
+echo -e "  📦 Current: ${CYAN}${BOLD}v${CURRENT_VERSION}${NC}"
 echo ""
-echo -e "${BOLD}╔══════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║     🚀 Zo Tunnel — Release Tool      ║${NC}"
-echo -e "${BOLD}╚══════════════════════════════════════════╝${NC}"
+echo -e "  ${GREEN}1)${NC} Patch  → ${BOLD}v${BUMP_PATCH}${NC}"
+echo -e "  ${GREEN}2)${NC} Minor  → ${BOLD}v${BUMP_MINOR}${NC}"
+echo -e "  ${GREEN}3)${NC} Major  → ${BOLD}v${BUMP_MAJOR}${NC}"
 echo ""
-echo -e "  📦 Current version: ${CYAN}${BOLD}v${CURRENT_VERSION}${NC}"
-echo ""
-echo -e "  Select new version:"
-echo ""
-echo -e "  ${GREEN}1)${NC} Patch  → ${BOLD}v${BUMP_PATCH}${NC}   (bug fixes, small)"
-echo -e "  ${GREEN}2)${NC} Minor  → ${BOLD}v${BUMP_MINOR}${NC}   (new features)"
-echo -e "  ${GREEN}3)${NC} Major  → ${BOLD}v${BUMP_MAJOR}${NC}   (breaking changes)"
-echo -e "  ${GREEN}4)${NC} Custom → ${BOLD}manual input${NC}"
-echo ""
-echo -ne "  👉 Choose (1/2/3/4): "
+echo -ne "  Choose (1/2/3): "
 read -r choice
 
 case "$choice" in
     1) NEW_VERSION="$BUMP_PATCH" ;;
     2) NEW_VERSION="$BUMP_MINOR" ;;
     3) NEW_VERSION="$BUMP_MAJOR" ;;
-    4)
-        echo -ne "  Enter version (e.g. 1.2.3): "
-        read -r NEW_VERSION
-        # Validate semver format
-        if [[ ! "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            err "Invalid version: $NEW_VERSION (must be x.y.z)"
-            exit 1
-        fi
-        ;;
-    *)
-        err "Invalid choice: $choice"
-        exit 1
-        ;;
+    *) fail "Invalid choice" ;;
 esac
 
+TAG="v${NEW_VERSION}"
 echo ""
-echo -e "  ${YELLOW}${BOLD}v${CURRENT_VERSION}${NC} → ${GREEN}${BOLD}v${NEW_VERSION}${NC}"
-echo ""
-echo -ne "  Confirm release ${BOLD}v${NEW_VERSION}${NC}? (y/N): "
+echo -e "  ${YELLOW}v${CURRENT_VERSION}${NC} → ${GREEN}${BOLD}${TAG}${NC}"
+echo -ne "  Confirm? (y/N): "
 read -r confirm
-if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-    info "Release cancelled."
-    exit 0
-fi
-
-echo ""
-info "Starting release v${NEW_VERSION}..."
-echo ""
+[[ "$confirm" =~ ^[Yy]$ ]] || { info "Cancelled."; exit 0; }
 
 # ═══════════════════════════════════════════════════════════════
-#  Pre-flight checks (same as CI)
+#  Step 1: Tests
 # ═══════════════════════════════════════════════════════════════
-info "🔍 Running pre-release checks..."
-echo ""
+header "Step 1/6 — Tests"
 
-info "[1/3] cargo test --workspace"
-if ! cargo test --workspace --quiet 2>&1; then
-    err "❌ Tests FAILED — release cancelled."
-    exit 1
-fi
+info "cargo test..."
+cargo test --workspace --quiet 2>&1 || fail "Tests failed"
 ok "Tests passed"
 
-info "[2/3] cargo clippy --workspace -- -D warnings"
-if ! cargo clippy --workspace -- -D warnings 2>&1; then
-    err "❌ Clippy FAILED — release cancelled."
-    exit 1
-fi
+info "cargo clippy..."
+cargo clippy --workspace -- -D warnings 2>&1 || fail "Clippy failed"
 ok "Clippy passed"
 
-info "[3/3] cargo build --release"
-if ! cargo build --release --quiet 2>&1; then
-    err "❌ Build FAILED — release cancelled."
-    exit 1
-fi
-ok "Release build passed"
+# ═══════════════════════════════════════════════════════════════
+#  Step 2: Update Versions
+# ═══════════════════════════════════════════════════════════════
+header "Step 2/6 — Update Versions"
 
-echo ""
-info "✅ All checks passed! Continuing with release..."
-echo ""
+for crate in zo-tunnel-protocol zo-tunnel-server zo-tunnel-client; do
+    FILE="$PROJECT_DIR/crates/$crate/Cargo.toml"
+    if [ -f "$FILE" ]; then
+        sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" "$FILE"
+        ok "$crate → v${NEW_VERSION}"
+    fi
+done
+
+# Update Cargo.lock
+cargo check --quiet 2>/dev/null || true
+ok "Cargo.lock updated"
 
 # ═══════════════════════════════════════════════════════════════
-#  Step 1: Update Cargo.toml versions
+#  Step 3: Build Binaries
 # ═══════════════════════════════════════════════════════════════
-CARGO_FILES=(
-    "$PROJECT_DIR/crates/zo-tunnel-protocol/Cargo.toml"
-    "$PROJECT_DIR/crates/zo-tunnel-server/Cargo.toml"
-    "$PROJECT_DIR/crates/zo-tunnel-client/Cargo.toml"
+header "Step 3/6 — Build Binaries"
+
+rm -rf "$DIST_DIR"
+mkdir -p "$DIST_DIR"
+
+TARGETS=(
+    "x86_64-unknown-linux-gnu:linux-amd64"
+    "aarch64-unknown-linux-gnu:linux-arm64"
 )
+BINARIES=("zo-tunnel-server" "zo-tunnel-client")
+BUILT_FILES=()
 
-for file in "${CARGO_FILES[@]}"; do
-    if [[ -f "$file" ]]; then
-        sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" "$file"
-        ok "Updated $(basename "$(dirname "$file")")/Cargo.toml → v${NEW_VERSION}"
+for entry in "${TARGETS[@]}"; do
+    TARGET="${entry%%:*}"
+    LABEL="${entry##*:}"
+
+    info "Building ${BOLD}${LABEL}${NC}..."
+
+    if cargo build --release --target "$TARGET" 2>&1; then
+        for binary in "${BINARIES[@]}"; do
+            BIN_PATH="$PROJECT_DIR/target/$TARGET/release/$binary"
+            if [ -f "$BIN_PATH" ]; then
+                TAR_NAME="${binary}-${TAG}-${LABEL}.tar.gz"
+                tar -czf "$DIST_DIR/$TAR_NAME" -C "$(dirname "$BIN_PATH")" "$binary"
+                SIZE=$(du -h "$DIST_DIR/$TAR_NAME" | cut -f1)
+                ok "${TAR_NAME} (${SIZE})"
+                BUILT_FILES+=("$DIST_DIR/$TAR_NAME")
+            fi
+        done
     else
-        warn "File not found: $file"
+        warn "Failed ${LABEL} — skipping"
+    fi
+done
+
+# Checksums
+cd "$DIST_DIR"
+sha256sum *.tar.gz > SHA256SUMS.txt 2>/dev/null || shasum -a 256 *.tar.gz > SHA256SUMS.txt
+BUILT_FILES+=("$DIST_DIR/SHA256SUMS.txt")
+ok "SHA256SUMS.txt"
+cd "$PROJECT_DIR"
+
+[ ${#BUILT_FILES[@]} -le 1 ] && fail "No binaries built!"
+
+# ═══════════════════════════════════════════════════════════════
+#  Step 4: Git Commit + Tag + Push
+# ═══════════════════════════════════════════════════════════════
+header "Step 4/6 — Git Push"
+
+git add -A
+git commit -m "release: ${TAG}"
+git tag -a "$TAG" -m "Release ${TAG}"
+git push origin "$(git branch --show-current)" --follow-tags
+ok "Pushed ${TAG}"
+
+# ═══════════════════════════════════════════════════════════════
+#  Step 5: Create GitHub Release
+# ═══════════════════════════════════════════════════════════════
+header "Step 5/6 — GitHub Release"
+
+RELEASE_BODY="## Install
+
+**Server (Linux VPS):**
+\`\`\`bash
+curl -sSL https://raw.githubusercontent.com/${REPO}/main/scripts/setup-server.sh | sudo bash
+\`\`\`
+
+**Client (macOS / Linux):**
+\`\`\`bash
+curl -sSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | bash
+\`\`\`"
+
+RELEASE_RESPONSE=$(curl -sSL -X POST \
+    -H "Authorization: token $GITHUB_TOKEN" \
+    -H "Content-Type: application/json" \
+    "https://api.github.com/repos/${REPO}/releases" \
+    -d "$(jq -n \
+        --arg tag "$TAG" \
+        --arg name "$TAG" \
+        --arg body "$RELEASE_BODY" \
+        '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false}')")
+
+RELEASE_ID=$(echo "$RELEASE_RESPONSE" | grep '"id"' | head -1 | grep -o '[0-9]*')
+[ -z "$RELEASE_ID" ] && { echo "$RELEASE_RESPONSE"; fail "Failed to create release"; }
+ok "Release created"
+
+# ═══════════════════════════════════════════════════════════════
+#  Step 6: Upload Assets
+# ═══════════════════════════════════════════════════════════════
+header "Step 6/6 — Upload Binaries"
+
+UPLOAD_URL="https://uploads.github.com/repos/${REPO}/releases/${RELEASE_ID}/assets"
+
+for file in "${BUILT_FILES[@]}"; do
+    FILENAME=$(basename "$file")
+    CONTENT_TYPE="application/gzip"
+    [ "$FILENAME" = "SHA256SUMS.txt" ] && CONTENT_TYPE="text/plain"
+
+    info "Uploading ${FILENAME}..."
+    RESP=$(curl -sSL -X POST \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Content-Type: $CONTENT_TYPE" \
+        "${UPLOAD_URL}?name=${FILENAME}" \
+        --data-binary "@$file")
+
+    if echo "$RESP" | grep -q '"state": "uploaded"'; then
+        ok "$FILENAME"
+    else
+        warn "Upload may have failed: $FILENAME"
     fi
 done
 
 # ═══════════════════════════════════════════════════════════════
-#  Step 2: Update Homebrew formula
+#  Done!
 # ═══════════════════════════════════════════════════════════════
-FORMULA="$PROJECT_DIR/Formula/zo-tunnel.rb"
-if [[ -f "$FORMULA" ]]; then
-    sed -i "s/version \"$CURRENT_VERSION\"/version \"$NEW_VERSION\"/" "$FORMULA"
-    ok "Updated Formula/zo-tunnel.rb → v${NEW_VERSION}"
-fi
-
-# ═══════════════════════════════════════════════════════════════
-#  Step 3: Update Cargo.lock (by running cargo check)
-# ═══════════════════════════════════════════════════════════════
-info "Updating Cargo.lock..."
-(cd "$PROJECT_DIR" && cargo check --quiet 2>/dev/null) || true
-ok "Cargo.lock updated"
-
-# ═══════════════════════════════════════════════════════════════
-#  Step 4: Git commit + tag + push
-# ═══════════════════════════════════════════════════════════════
-echo ""
-info "Git commit & tag..."
-
-cd "$PROJECT_DIR"
-git add -A
-git commit -m "release: v${NEW_VERSION}" --allow-empty
-
-TAG="v${NEW_VERSION}"
-git tag -a "$TAG" -m "Release ${TAG}"
-ok "Created tag: ${TAG}"
+RELEASE_URL="https://github.com/${REPO}/releases/tag/${TAG}"
 
 echo ""
-info "Pushing to remote..."
-git push origin main --follow-tags 2>/dev/null || git push origin "$(git branch --show-current)" --follow-tags
-
+echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║  🎉 Release ${TAG} complete!                          ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${BOLD}╔══════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║       🎉 Release v${NEW_VERSION} complete!           ║${NC}"
-echo -e "${BOLD}╚══════════════════════════════════════════╝${NC}"
+echo -e "  🔗 ${CYAN}${RELEASE_URL}${NC}"
 echo ""
-echo -e "  📌 Tag:      ${CYAN}${TAG}${NC}"
-echo -e "  📦 Version:  ${GREEN}v${NEW_VERSION}${NC}"
-echo ""
-echo -e "  GitHub Actions will automatically:"
-echo -e "    • Build binaries (linux/macos × amd64/arm64)"
-echo -e "    • Push Docker image to GHCR"
-echo -e "    • Create GitHub Release + upload artifacts"
-echo -e "    • Update Homebrew formula"
-echo ""
-echo -e "  🔗 Monitor at: ${BLUE}https://github.com/Zobite/zo-tunnel/actions${NC}"
+echo -e "  Install:"
+echo -e "    ${CYAN}curl -sSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | bash${NC}"
 echo ""
