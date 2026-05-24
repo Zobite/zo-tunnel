@@ -117,24 +117,15 @@ impl TcpPortAllocator {
         }
     }
 
+
     /// Allocate a free port from the range. Returns None if all ports are taken.
     pub fn allocate(&self) -> Option<u16> {
-        for port in self.port_start..=self.port_end {
-            if self.used.insert(port) {
-                return Some(port);
-            }
-        }
-        None
+        (self.port_start..=self.port_end).find(|port| self.used.insert(*port))
     }
 
     /// Release a previously allocated port.
     pub fn release(&self, port: u16) {
         self.used.remove(&port);
-    }
-
-    /// Count of in-use ports.
-    pub fn in_use(&self) -> usize {
-        self.used.len()
     }
 
     /// Total capacity.

@@ -37,18 +37,14 @@ pub struct ServerConfig {
     pub log_level: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RoutingMode {
+    #[default]
     Path,
     Subdomain,
 }
 
-impl Default for RoutingMode {
-    fn default() -> Self {
-        Self::Path
-    }
-}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TlsConfig {
@@ -60,17 +56,12 @@ pub struct TlsConfig {
     pub key: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AuthConfig {
     #[serde(default)]
     pub tokens: Vec<String>,
 }
 
-impl Default for AuthConfig {
-    fn default() -> Self {
-        Self { tokens: vec![] }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimitConfig {
