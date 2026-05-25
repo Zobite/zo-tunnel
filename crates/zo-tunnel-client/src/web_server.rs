@@ -127,12 +127,12 @@ pub fn create_router(state: AppState) -> Router {
         // Tunnel CRUD API
         .route("/api/tunnels", get(api_list_tunnels))
         .route("/api/tunnels", post(api_add_tunnel))
-        .route("/api/tunnels/{id}", put(api_update_tunnel))
-        .route("/api/tunnels/{id}", delete(api_delete_tunnel))
+        .route("/api/tunnels/:id", put(api_update_tunnel))
+        .route("/api/tunnels/:id", delete(api_delete_tunnel))
         // Tunnel actions
-        .route("/api/tunnels/{id}/start", post(api_start_tunnel))
-        .route("/api/tunnels/{id}/stop", post(api_stop_tunnel))
-        .route("/api/tunnels/{id}/restart", post(api_restart_tunnel))
+        .route("/api/tunnels/:id/start", post(api_start_tunnel))
+        .route("/api/tunnels/:id/stop", post(api_stop_tunnel))
+        .route("/api/tunnels/:id/restart", post(api_restart_tunnel))
         // Status
         .route("/api/status", get(api_status))
         // Upgrade API

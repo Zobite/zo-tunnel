@@ -52,18 +52,28 @@ echo ""
 
 cd "$PROJECT_DIR"
 
+HOST_OS="$(uname -s)"
+
 # Git check
 git rev-parse --is-inside-work-tree &>/dev/null || fail "Not a git repo"
 
 # gh CLI check
-command -v gh &>/dev/null || fail "gh CLI not installed. Run: apt install gh && gh auth login"
+if ! command -v gh &>/dev/null; then
+    if [ "$HOST_OS" = "Darwin" ]; then
+        fail "gh CLI not installed. Run: brew install gh && gh auth login"
+    else
+        fail "gh CLI not installed. Run: apt install gh && gh auth login"
+    fi
+fi
 gh auth status &>/dev/null || fail "gh not authenticated. Run: gh auth login"
 
-# ARM64 cross-compiler (for Linux ARM64)
-if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
-    info "Installing aarch64-linux-gnu-gcc..."
-    sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu >/dev/null 2>&1 \
-        || warn "Could not install gcc-aarch64 — Linux ARM64 build will be skipped"
+# ARM64 cross-compiler (for Linux ARM64 - only needed on Linux host)
+if [ "$HOST_OS" = "Linux" ]; then
+    if ! command -v aarch64-linux-gnu-gcc &>/dev/null; then
+        info "Installing aarch64-linux-gnu-gcc..."
+        sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu >/dev/null 2>&1 \
+            || warn "Could not install gcc-aarch64 — Linux ARM64 build will be skipped"
+    fi
 fi
 
 # Rust targets
@@ -71,14 +81,16 @@ rustup target add aarch64-unknown-linux-gnu 2>/dev/null || true
 rustup target add x86_64-apple-darwin 2>/dev/null || true
 rustup target add aarch64-apple-darwin 2>/dev/null || true
 
-# Cargo config for Linux ARM64 linker
-mkdir -p "$PROJECT_DIR/.cargo"
-if ! grep -q "aarch64-unknown-linux-gnu" "$PROJECT_DIR/.cargo/config.toml" 2>/dev/null; then
-    cat >> "$PROJECT_DIR/.cargo/config.toml" <<'EOF'
+# Cargo config for Linux ARM64 linker (only needed on Linux host)
+if [ "$HOST_OS" = "Linux" ]; then
+    mkdir -p "$PROJECT_DIR/.cargo"
+    if ! grep -q "aarch64-unknown-linux-gnu" "$PROJECT_DIR/.cargo/config.toml" 2>/dev/null; then
+        cat >> "$PROJECT_DIR/.cargo/config.toml" <<'EOF'
 
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
 EOF
+    fi
 fi
 
 # cargo-zigbuild (for macOS cross-compile from Linux)
@@ -90,19 +102,23 @@ fi
 # zig compiler
 if ! command -v zig &>/dev/null; then
     info "Installing zig..."
-    ZIG_VERSION="0.13.0"
-    ZIG_ARCH="$(uname -m)"
-    ZIG_URL="https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ZIG_ARCH}-${ZIG_VERSION}.tar.xz"
-    ZIG_DIR="/usr/local/zig"
+    if [ "$HOST_OS" = "Darwin" ]; then
+        fail "zig not installed. Run: brew install zig"
+    else
+        ZIG_VERSION="0.13.0"
+        ZIG_ARCH="$(uname -m)"
+        ZIG_URL="https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ZIG_ARCH}-${ZIG_VERSION}.tar.xz"
+        ZIG_DIR="/usr/local/zig"
 
-    TMP_ZIG=$(mktemp -d)
-    curl -sSL "$ZIG_URL" -o "$TMP_ZIG/zig.tar.xz"
-    sudo mkdir -p "$ZIG_DIR"
-    sudo tar -xJf "$TMP_ZIG/zig.tar.xz" -C "$ZIG_DIR" --strip-components=1
-    sudo ln -sf "$ZIG_DIR/zig" /usr/local/bin/zig
-    rm -rf "$TMP_ZIG"
-    command -v zig &>/dev/null || fail "zig installation failed"
-    ok "zig $(zig version) installed"
+        TMP_ZIG=$(mktemp -d)
+        curl -sSL "$ZIG_URL" -o "$TMP_ZIG/zig.tar.xz"
+        sudo mkdir -p "$ZIG_DIR"
+        sudo tar -xJf "$TMP_ZIG/zig.tar.xz" -C "$ZIG_DIR" --strip-components=1
+        sudo ln -sf "$ZIG_DIR/zig" /usr/local/bin/zig
+        rm -rf "$TMP_ZIG"
+        command -v zig &>/dev/null || fail "zig installation failed"
+        ok "zig $(zig version) installed"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -163,7 +179,11 @@ header "Step 2/6 — Update Versions"
 for crate in zo-tunnel-protocol zo-tunnel-server zo-tunnel-client; do
     FILE="$PROJECT_DIR/crates/$crate/Cargo.toml"
     if [ -f "$FILE" ]; then
-        sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" "$FILE"
+        if [ "$HOST_OS" = "Darwin" ]; then
+            sed -i "" "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" "$FILE"
+        else
+            sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" "$FILE"
+        fi
         ok "$crate → v${NEW_VERSION}"
     fi
 done
@@ -200,9 +220,15 @@ for entry in "${LINUX_TARGETS[@]}"; do
     TARGET="${entry%%:*}"
     LABEL="${entry##*:}"
 
-    info "Building ${BOLD}${LABEL}${NC} (cargo)..."
+    if [ "$HOST_OS" = "Linux" ]; then
+        BUILD_CMD="cargo build"
+    else
+        BUILD_CMD="cargo zigbuild"
+    fi
 
-    if cargo build --release --target "$TARGET" 2>&1; then
+    info "Building ${BOLD}${LABEL}${NC} (${BUILD_CMD})..."
+
+    if $BUILD_CMD --release --target "$TARGET" 2>&1; then
         for binary in "${BINARIES[@]}"; do
             BIN_PATH="$PROJECT_DIR/target/$TARGET/release/$binary"
             if [ -f "$BIN_PATH" ]; then
@@ -218,14 +244,20 @@ for entry in "${LINUX_TARGETS[@]}"; do
     fi
 done
 
-# ─── Build macOS targets (zigbuild) ───
+# ─── Build macOS targets ───
 for entry in "${MACOS_TARGETS[@]}"; do
     TARGET="${entry%%:*}"
     LABEL="${entry##*:}"
 
-    info "Building ${BOLD}${LABEL}${NC} (zigbuild)..."
+    if [ "$HOST_OS" = "Darwin" ]; then
+        BUILD_CMD="cargo build"
+    else
+        BUILD_CMD="cargo zigbuild"
+    fi
 
-    if cargo zigbuild --release --target "$TARGET" 2>&1; then
+    info "Building ${BOLD}${LABEL}${NC} (${BUILD_CMD})..."
+
+    if $BUILD_CMD --release --target "$TARGET" 2>&1; then
         for binary in "${BINARIES[@]}"; do
             BIN_PATH="$PROJECT_DIR/target/$TARGET/release/$binary"
             if [ -f "$BIN_PATH" ]; then

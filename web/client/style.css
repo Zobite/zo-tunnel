@@ -1084,7 +1084,7 @@ body::before {
 /* ─── Upgrade Banner & Overlay ────────────────────────────────── */
 
 .upgrade-banner {
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: space-between;
     padding: var(--space-sm) var(--space-lg);

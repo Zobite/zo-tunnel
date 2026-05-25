@@ -233,9 +233,9 @@
             }
 
             // Ensure cards preserve the order from API and avoid moving elements unnecessarily
-            var currentSibling = lastElement ? lastElement.nextSibling : container.firstChild;
+            var currentSibling = lastElement ? lastElement.nextElementSibling : container.firstElementChild;
             while (currentSibling && !currentSibling.classList.contains('tunnel-card')) {
-                currentSibling = currentSibling.nextSibling;
+                currentSibling = currentSibling.nextElementSibling;
             }
 
             if (currentSibling !== card) {
