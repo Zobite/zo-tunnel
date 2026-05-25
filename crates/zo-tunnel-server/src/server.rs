@@ -131,18 +131,7 @@ impl Server {
         let control_listener = TcpListener::bind(("0.0.0.0", self.config.control_port))
             .await
             .with_context(|| format!("bind control port {}", self.config.control_port))?;
-        tracing::info!(
-            "🔌 Control channel on :{}{}",
-            self.config.control_port,
-            if self.config.tls.enabled { " (TLS)" } else { "" }
-        );
-
-        // ── TLS setup (optional) ──
-        let tls_acceptor = if self.config.tls.enabled {
-            Some(self.setup_tls()?)
-        } else {
-            None
-        };
+        tracing::info!("🔌 Control channel on :{}", self.config.control_port);
 
         // ── Dashboard state ──
         let dash_state = DashboardState {
@@ -150,7 +139,7 @@ impl Server {
             metrics: metrics.clone(),
             dashboard_token: self.config.dashboard_auth.token.clone(),
             auth_enabled: self.config.dashboard_auth_enabled(),
-            tls_enabled: self.config.tls.enabled,
+            tls_enabled: self.config.traefik.enabled,
             sessions: Arc::new(dashboard::SessionStore::new(
                 self.config.dashboard_auth.session_ttl_secs,
             )),
@@ -166,9 +155,8 @@ impl Server {
         let reg_ctrl = registry.clone();
         let met_ctrl = metrics.clone();
         let config_ctrl = self.config.clone();
-        let tls_ctrl = tls_acceptor.clone();
         let control_task = tokio::spawn(async move {
-            Self::accept_clients(control_listener, tls_ctrl, reg_ctrl, met_ctrl, config_ctrl).await;
+            Self::accept_clients(control_listener, reg_ctrl, met_ctrl, config_ctrl).await;
         });
 
         // ── Public HTTP listener (subdomain proxy + dashboard) ──
@@ -184,9 +172,8 @@ impl Server {
         let met_pub = metrics.clone();
         let rl_pub = rate_limiter.clone();
         let dom = domain.clone();
-        let tls_pub = tls_acceptor.clone();
         let public_task = tokio::spawn(async move {
-            Self::accept_public(public_listener, reg_pub, met_pub, rl_pub, dom, dashboard_router, tls_pub)
+            Self::accept_public(public_listener, reg_pub, met_pub, rl_pub, dom, dashboard_router)
                 .await;
         });
 
@@ -229,36 +216,9 @@ impl Server {
         Ok(())
     }
 
-    /// Setup TLS acceptor from cert and key files.
-    fn setup_tls(&self) -> Result<tokio_rustls::TlsAcceptor> {
-        use std::io::BufReader;
-        use tokio_rustls::rustls;
-
-        let cert_file = std::fs::File::open(&self.config.tls.cert)
-            .with_context(|| format!("open TLS cert: {}", self.config.tls.cert))?;
-        let key_file = std::fs::File::open(&self.config.tls.key)
-            .with_context(|| format!("open TLS key: {}", self.config.tls.key))?;
-
-        let certs: Vec<_> = rustls_pemfile::certs(&mut BufReader::new(cert_file))
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .context("parse TLS certs")?;
-
-        let key = rustls_pemfile::private_key(&mut BufReader::new(key_file))
-            .context("parse TLS key")?
-            .context("no private key found")?;
-
-        let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .context("build TLS config")?;
-
-        Ok(tokio_rustls::TlsAcceptor::from(Arc::new(config)))
-    }
-
     /// Accept and handle control channel connections from tunnel clients.
     async fn accept_clients(
         listener: TcpListener,
-        tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
         registry: Arc<Registry>,
         metrics: Arc<Metrics>,
         config: ServerConfig,
@@ -272,24 +232,10 @@ impl Server {
                     let reg = registry.clone();
                     let met = metrics.clone();
                     let cfg = config.clone();
-                    let tls = tls_acceptor.clone();
 
                     tokio::spawn(async move {
-                        if let Some(acceptor) = tls {
-                            match acceptor.accept(stream).await {
-                                Ok(tls_stream) => {
-                                    if let Err(e) = Self::handle_client(tls_stream, reg, met, cfg).await {
-                                        tracing::warn!("Client {} error: {:#}", addr, e);
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!("TLS handshake failed from {}: {}", addr, e);
-                                }
-                            }
-                        } else {
-                            if let Err(e) = Self::handle_client(stream, reg, met, cfg).await {
-                                tracing::warn!("Client {} error: {:#}", addr, e);
-                            }
+                        if let Err(e) = Self::handle_client(stream, reg, met, cfg).await {
+                            tracing::warn!("Client {} error: {:#}", addr, e);
                         }
                     });
                 }
@@ -409,7 +355,6 @@ impl Server {
         rate_limiter: Arc<RateLimiter>,
         domain: String,
         dashboard_router: axum::Router,
-        tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     ) {
         loop {
             let (tcp_stream, addr) = match listener.accept().await {
@@ -426,23 +371,9 @@ impl Server {
             let rl = rate_limiter.clone();
             let dom = domain.clone();
             let dash = dashboard_router.clone();
-            let tls = tls_acceptor.clone();
 
             tokio::spawn(async move {
-                let result = if let Some(acceptor) = tls {
-                    match acceptor.accept(tcp_stream).await {
-                        Ok(tls_stream) => {
-                            Self::serve_http(TokioIo::new(tls_stream), reg, met, rl, dom, dash).await
-                        }
-                        Err(e) => {
-                            tracing::debug!("TLS accept error from {}: {}", addr, e);
-                            return;
-                        }
-                    }
-                } else {
-                    Self::serve_http(TokioIo::new(tcp_stream), reg, met, rl, dom, dash).await
-                };
-
+                let result = Self::serve_http(TokioIo::new(tcp_stream), reg, met, rl, dom, dash).await;
                 if let Err(e) = result {
                     tracing::debug!("HTTP error from {}: {}", addr, e);
                 }

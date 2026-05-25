@@ -22,9 +22,6 @@ pub struct ServerConfig {
     pub domain: String,
 
     #[serde(default)]
-    pub tls: TlsConfig,
-
-    #[serde(default)]
     pub auth: AuthConfig,
 
     #[serde(default)]
@@ -43,15 +40,7 @@ pub struct ServerConfig {
 
 
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TlsConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub cert: String,
-    #[serde(default)]
-    pub key: String,
-}
+
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AuthConfig {
@@ -98,12 +87,14 @@ impl Default for RateLimitConfig {
 }
 
 /// Traefik integration — auto-create/delete per-client route config files.
+/// Auto-detected: if a Traefik dynamic config directory exists, integration
+/// is enabled automatically. No manual configuration needed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraefikConfig {
-    /// Enable Traefik integration
+    /// Enable Traefik integration (auto-detected if not set)
     #[serde(default)]
     pub enabled: bool,
-    /// Directory for Traefik dynamic config files (e.g. /etc/traefik/dynamic/)
+    /// Directory for Traefik dynamic config files
     #[serde(default = "default_traefik_dir")]
     pub config_dir: String,
     /// Traefik entrypoint name
@@ -112,6 +103,29 @@ pub struct TraefikConfig {
     /// Traefik certificate resolver name
     #[serde(default = "default_traefik_cert_resolver")]
     pub cert_resolver: String,
+}
+
+impl TraefikConfig {
+    /// Common Traefik dynamic config directories to auto-detect.
+    const TRAEFIK_DIRS: &[&str] = &[
+        "/etc/traefik/conf.d",
+        "/etc/traefik/dynamic",
+    ];
+
+    /// Auto-detect Traefik: if a known directory exists, enable integration.
+    pub fn auto_detect() -> Self {
+        for dir in Self::TRAEFIK_DIRS {
+            if std::path::Path::new(dir).is_dir() {
+                return Self {
+                    enabled: true,
+                    config_dir: dir.to_string(),
+                    entrypoint: default_traefik_entrypoint(),
+                    cert_resolver: default_traefik_cert_resolver(),
+                };
+            }
+        }
+        Self::default()
+    }
 }
 
 impl Default for TraefikConfig {
@@ -126,7 +140,7 @@ impl Default for TraefikConfig {
 }
 
 fn default_traefik_dir() -> String {
-    "/etc/traefik/dynamic".into()
+    "/etc/traefik/conf.d".into()
 }
 fn default_traefik_entrypoint() -> String {
     "websecure".into()
@@ -160,7 +174,6 @@ impl Default for ServerConfig {
             control_port: default_control_port(),
             public_port: default_public_port(),
             domain: String::new(),
-            tls: TlsConfig::default(),
             auth: AuthConfig::default(),
             dashboard_auth: DashboardAuthConfig::default(),
             rate_limit: RateLimitConfig::default(),
@@ -299,7 +312,6 @@ mod tests {
         assert_eq!(cfg.control_port, 6200);
         assert_eq!(cfg.public_port, 6210);
         assert!(cfg.domain.is_empty());
-        assert!(!cfg.tls.enabled);
         assert!(cfg.auth.tokens.is_empty());
         assert!(cfg.dashboard_auth.token.is_empty());
         assert_eq!(cfg.dashboard_auth.session_ttl_secs, 86400);

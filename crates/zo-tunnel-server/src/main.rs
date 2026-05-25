@@ -72,22 +72,9 @@ struct StartArgs {
     #[arg(long, default_value_t = 6210)]
     public_port: u16,
 
-    /// TLS certificate file (PEM)
-    #[arg(long)]
-    tls_cert: Option<String>,
-
-    /// TLS private key file (PEM)
-    #[arg(long)]
-    tls_key: Option<String>,
-
     /// Overwrite existing config without asking
     #[arg(long)]
     force: bool,
-
-    /// Enable Traefik integration — auto-create route configs per client.
-    /// Specify the Traefik dynamic config directory (e.g. /etc/traefik/dynamic).
-    #[arg(long)]
-    traefik_dir: Option<String>,
 
     /// Run in foreground mode (for debugging or systemd).
     /// Default: install and start as systemd service.
@@ -224,19 +211,10 @@ fn create_config(args: &StartArgs) -> Result<config::ServerConfig> {
     cfg.auth.tokens = vec![client_token];
     cfg.dashboard_auth.token = dashboard_token;
 
-    // TLS
-    if let Some(ref cert) = args.tls_cert {
-        cfg.tls.enabled = true;
-        cfg.tls.cert = cert.clone();
-    }
-    if let Some(ref key) = args.tls_key {
-        cfg.tls.key = key.clone();
-    }
-
-    // Traefik integration
-    if let Some(ref dir) = args.traefik_dir {
-        cfg.traefik.enabled = true;
-        cfg.traefik.config_dir = dir.clone();
+    // Auto-detect Traefik
+    cfg.traefik = config::TraefikConfig::auto_detect();
+    if cfg.traefik.enabled {
+        eprintln!("  🔀 Traefik detected: {}", cfg.traefik.config_dir);
     }
 
     cfg.save().context("save config")?;
@@ -262,18 +240,15 @@ fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
     println!("  Control port:    {}", cfg.control_port);
     println!("  Public port:     {}", cfg.public_port);
     println!("  Dashboard:       dashboard.{}", cfg.domain);
-    if cfg.tls.enabled {
-        println!("  TLS:             enabled");
-    }
     if cfg.traefik.enabled {
-        println!("  Traefik:         enabled ({})", cfg.traefik.config_dir);
+        println!("  TLS:             via Traefik ({})", cfg.traefik.config_dir);
     }
     println!();
 
     // Always show tokens and connect info
     let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
     let dashboard_token = &cfg.dashboard_auth.token;
-    let scheme = if cfg.tls.enabled { "https" } else { "http" };
+    let scheme = if cfg.traefik.enabled { "https" } else { "http" };
 
     println!("  🔑 Client token:     {}", client_token);
     println!("  🔑 Dashboard token:  {}", dashboard_token);
@@ -337,7 +312,7 @@ async fn run_foreground() -> Result<()> {
 
     tracing::info!(
         "Domain:*.{} | Control:{} | Public:{} | TLS:{}",
-        cfg.domain, cfg.control_port, cfg.public_port, cfg.tls.enabled,
+        cfg.domain, cfg.control_port, cfg.public_port, cfg.traefik.enabled,
     );
     tracing::info!("Config: {}", config_path.display());
 
@@ -431,20 +406,17 @@ fn cmd_status() -> Result<()> {
     println!("  Control port:    {}", cfg.control_port);
     println!("  Public port:     {}", cfg.public_port);
     println!("  Dashboard:       dashboard.{}", cfg.domain);
-    if cfg.tls.enabled {
-        println!("  TLS:             enabled");
+    if cfg.traefik.enabled {
+        println!("  TLS:             via Traefik ({})", cfg.traefik.config_dir);
     }
     println!("  Client tokens:   {} configured", cfg.auth.tokens.len());
     println!("  Dashboard auth:  {}", if cfg.dashboard_auth_enabled() { "enabled" } else { "disabled" });
-    if cfg.traefik.enabled {
-        println!("  Traefik:         enabled ({})", cfg.traefik.config_dir);
-    }
     println!();
 
     // Show tokens and connect info
     let server_ip = detect_server_ip();
     let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
-    let scheme = if cfg.tls.enabled { "https" } else { "http" };
+    let scheme = if cfg.traefik.enabled { "https" } else { "http" };
 
     println!("  🔑 Client token:     {}", client_token);
     println!("  🔑 Dashboard token:  {}", &cfg.dashboard_auth.token);
