@@ -31,6 +31,12 @@ enum Command {
 
     /// Show current server configuration and status.
     Status,
+
+    /// Upgrade to the latest version from GitHub releases.
+    Upgrade,
+
+    /// Uninstall the server binary, systemd service, and config.
+    Uninstall(UninstallArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -71,6 +77,17 @@ struct SetupArgs {
     force: bool,
 }
 
+#[derive(Parser, Debug)]
+struct UninstallArgs {
+    /// Skip confirmation prompt
+    #[arg(long, short)]
+    yes: bool,
+
+    /// Keep config files (only remove binary and service)
+    #[arg(long)]
+    keep_config: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -79,6 +96,8 @@ async fn main() -> Result<()> {
         Command::Setup(args) => cmd_setup(args),
         Command::Start => cmd_start().await,
         Command::Status => cmd_status(),
+        Command::Upgrade => cmd_upgrade(),
+        Command::Uninstall(args) => cmd_uninstall(args),
     }
 }
 
@@ -226,4 +245,22 @@ fn cmd_status() -> Result<()> {
     println!();
 
     Ok(())
+}
+
+/// `zo-tunnel-server upgrade` — self-upgrade from GitHub releases.
+fn cmd_upgrade() -> Result<()> {
+    zo_tunnel_protocol::self_update::upgrade(
+        "zo-tunnel-server",
+        env!("CARGO_PKG_VERSION"),
+    )
+}
+
+/// `zo-tunnel-server uninstall` — remove binary, service, and config.
+fn cmd_uninstall(args: UninstallArgs) -> Result<()> {
+    zo_tunnel_protocol::self_update::uninstall(
+        "zo-tunnel-server",
+        zo_tunnel_protocol::self_update::Component::Server,
+        args.yes,
+        args.keep_config,
+    )
 }

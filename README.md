@@ -174,9 +174,47 @@ Loads saved config and starts the server. No additional flags.
 
 Displays current configuration summary and token info.
 
+#### `zo-tunnel-server upgrade`
+
+Self-upgrade to the latest version from GitHub releases.
+
+```bash
+zo-tunnel-server upgrade
+```
+
+- Checks GitHub for the latest release
+- Compares with current version — skips if already up-to-date
+- Downloads the correct binary for your OS/arch
+- Replaces the binary in `/usr/local/bin/` (uses `sudo` if needed)
+
+> **Note:** Restart the service after upgrading: `sudo systemctl restart zo-tunnel`
+
+#### `zo-tunnel-server uninstall`
+
+Remove the server binary, systemd service, and config.
+
+```bash
+zo-tunnel-server uninstall           # interactive confirmation
+zo-tunnel-server uninstall --yes     # skip confirmation
+zo-tunnel-server uninstall --keep-config  # preserve /etc/zo-tunnel/
+```
+
+| Flag | Description |
+|---|---|
+| `--yes` / `-y` | Skip confirmation prompt |
+| `--keep-config` | Keep config files, only remove binary and service |
+
 ### Client
 
-#### `zo-tunnel-client`
+#### `zo-tunnel-client [connect]`
+
+Connect to the tunnel server. The `connect` subcommand is optional — you can use the flags directly.
+
+```bash
+# Both are equivalent:
+zo-tunnel-client --server vps:6200 --local localhost:3000 --id my-app --token SECRET
+zo-tunnel-client connect --server vps:6200 --local localhost:3000 --id my-app --token SECRET
+```
 
 | Flag | Env var | Default | Description |
 |---|---|---|---|
@@ -189,6 +227,23 @@ Displays current configuration summary and token info.
 | `--tls` | `ZO_TLS` | `false` | Enable TLS for control channel |
 | `--tls-server-name` | — | *(from --server)* | Server name for TLS SNI |
 | `--tls-skip-verify` | — | `false` | Skip TLS cert verification (⚠️ dev only) |
+
+#### `zo-tunnel-client upgrade`
+
+Self-upgrade to the latest version from GitHub releases.
+
+```bash
+zo-tunnel-client upgrade
+```
+
+#### `zo-tunnel-client uninstall`
+
+Remove the client binary.
+
+```bash
+zo-tunnel-client uninstall           # interactive confirmation
+zo-tunnel-client uninstall --yes     # skip confirmation
+```
 
 ---
 
@@ -346,11 +401,13 @@ zo-tunnel/
 │
 ├── crates/
 │   ├── zo-tunnel-protocol/       # Shared protocol library
-│   │   └── src/lib.rs            #   Messages, frame encoding, constants
+│   │   └── src/
+│   │       ├── lib.rs            #   Messages, frame encoding, constants
+│   │       └── self_update.rs    #   Self-upgrade + uninstall logic
 │   │
 │   ├── zo-tunnel-server/         # Server binary
 │   │   └── src/
-│   │       ├── main.rs           #   CLI: setup / start / status
+│   │       ├── main.rs           #   CLI: setup / start / status / upgrade / uninstall
 │   │       ├── config.rs         #   YAML config + defaults
 │   │       ├── server.rs         #   Control channel, yamux, subdomain routing
 │   │       ├── registry.rs       #   Client registry (DashMap)
@@ -360,7 +417,7 @@ zo-tunnel/
 │   │
 │   └── zo-tunnel-client/         # Client binary
 │       └── src/
-│           ├── main.rs           #   CLI + reconnect loop
+│           ├── main.rs           #   CLI: connect / upgrade / uninstall
 │           ├── config.rs         #   YAML config
 │           └── client.rs         #   Auth, yamux, stream proxy
 │
