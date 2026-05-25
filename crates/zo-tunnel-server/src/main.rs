@@ -39,9 +39,6 @@ enum Command {
     /// View server logs (journalctl).
     Logs(LogsArgs),
 
-    /// Print a ready-to-copy client connect command.
-    ClientCmd(ClientCmdArgs),
-
     /// Upgrade to the latest version from GitHub releases.
     Upgrade,
 
@@ -109,16 +106,7 @@ struct LogsArgs {
     follow: bool,
 }
 
-#[derive(Parser, Debug)]
-struct ClientCmdArgs {
-    /// Client ID / tunnel name (default: my-app)
-    #[arg(long, default_value = "my-app")]
-    id: String,
 
-    /// Local service address (default: localhost:3000)
-    #[arg(long, default_value = "localhost:3000")]
-    local: String,
-}
 
 #[derive(Parser, Debug)]
 struct UninstallArgs {
@@ -141,7 +129,6 @@ async fn main() -> Result<()> {
         Command::Restart => cmd_restart(),
         Command::Status => cmd_status(),
         Command::Logs(args) => cmd_logs(args),
-        Command::ClientCmd(args) => cmd_client_cmd(args),
         Command::Upgrade => cmd_upgrade(),
         Command::Uninstall(args) => cmd_uninstall(args),
     }
@@ -275,7 +262,9 @@ fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
     println!("  Control port:    {}", cfg.control_port);
     println!("  Public port:     {}", cfg.public_port);
     println!("  Dashboard:       dashboard.{}", cfg.domain);
-    println!("  TLS:             {}", if cfg.tls.enabled { "enabled" } else { "disabled" });
+    if cfg.tls.enabled {
+        println!("  TLS:             enabled");
+    }
     if cfg.traefik.enabled {
         println!("  Traefik:         enabled ({})", cfg.traefik.config_dir);
     }
@@ -442,79 +431,37 @@ fn cmd_status() -> Result<()> {
     println!("  Control port:    {}", cfg.control_port);
     println!("  Public port:     {}", cfg.public_port);
     println!("  Dashboard:       dashboard.{}", cfg.domain);
-    println!("  TLS:             {}", if cfg.tls.enabled { "enabled" } else { "disabled" });
+    if cfg.tls.enabled {
+        println!("  TLS:             enabled");
+    }
     println!("  Client tokens:   {} configured", cfg.auth.tokens.len());
     println!("  Dashboard auth:  {}", if cfg.dashboard_auth_enabled() { "enabled" } else { "disabled" });
     if cfg.traefik.enabled {
         println!("  Traefik:         enabled ({})", cfg.traefik.config_dir);
-    } else {
-        println!("  Traefik:         disabled");
     }
     println!();
 
-    for (i, token) in cfg.auth.tokens.iter().enumerate() {
-        let masked = if token.len() > 8 {
-            format!("{}...{}", &token[..4], &token[token.len()-4..])
-        } else {
-            "****".into()
-        };
-        println!("  Token #{}: {}", i + 1, masked);
-    }
-    println!();
-
-    Ok(())
-}
-
-/// `zo-tunnel-server client-cmd` — print a ready-to-copy client connect command.
-fn cmd_client_cmd(args: ClientCmdArgs) -> Result<()> {
-    let config_path = match config::ServerConfig::resolve_config_path() {
-        Some(p) => p,
-        None => {
-            println!("❌ No config found.");
-            println!("   Run `zo-tunnel-server start --domain <domain>` first.");
-            return Ok(());
-        }
-    };
-
-    let cfg = config::ServerConfig::load(&config_path)
-        .context("load config")?;
-
-    if cfg.auth.tokens.is_empty() {
-        println!("❌ No client tokens configured.");
-        println!("   Run `zo-tunnel-server start --domain <domain>` to generate one.");
-        return Ok(());
-    }
-
-    let server_addr = if cfg.domain.is_empty() {
-        format!("<VPS_IP>:{}", cfg.control_port)
-    } else {
-        format!("{}:{}", cfg.domain, cfg.control_port)
-    };
-
-    let token = &cfg.auth.tokens[0];
+    // Show tokens and connect info
+    let server_ip = detect_server_ip();
+    let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
     let scheme = if cfg.tls.enabled { "https" } else { "http" };
 
+    println!("  🔑 Client token:     {}", client_token);
+    println!("  🔑 Dashboard token:  {}", &cfg.dashboard_auth.token);
     println!();
-    println!("╔══════════════════════════════════════╗");
-    println!("║   Zo Tunnel — Client Connect Command ║");
-    println!("╚══════════════════════════════════════╝");
+    println!("  ▸ Connect client:");
+    println!("    zo-tunnel-client --server {}:{} \\", server_ip, cfg.control_port);
+    println!("      --id my-api --local localhost:3000 \\");
+    println!("      --token {}", client_token);
     println!();
-    println!("  Copy and run on your local machine:");
-    println!();
-    println!("  zo-tunnel-client --server {} --token {} --id {} --local {}", server_addr, token, args.id, args.local);
-    println!();
-
-    if !cfg.domain.is_empty() {
-        println!("  ▸ Access tunnel:  {}://{}.{}", scheme, args.id, cfg.domain);
-        println!("  ▸ Dashboard:      {}://dashboard.{}", scheme, cfg.domain);
-    }
-    println!();
-    println!("  💡 Customize --id and --local to match your app.");
-    println!("     Example: --id my-api --local localhost:8080");
+    println!("  ▸ Access tunnel:    {}://my-api.{}", scheme, cfg.domain);
+    println!("  ▸ Dashboard:        {}://dashboard.{}", scheme, cfg.domain);
     println!();
 
     Ok(())
 }
+
+
 
 /// `zo-tunnel-server upgrade` — self-upgrade from GitHub releases.
 fn cmd_upgrade() -> Result<()> {
