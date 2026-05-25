@@ -193,14 +193,14 @@ if [ "$COMPONENT" = "client" ] || [ "$COMPONENT" = "all" ]; then
 fi
 
 if [ "$COMPONENT" = "server" ] || [ "$COMPONENT" = "all" ]; then
-    echo "  Server setup (port mode — simplest):"
-    echo -e "    ${CYAN}zo-tunnel-server setup${NC}"
+    echo "  Start server (first time — creates config + systemd service):"
+    echo -e "    ${CYAN}zo-tunnel-server start --domain YOUR_DOMAIN${NC}"
     echo ""
-    echo "  Or with subdomain mode:"
-    echo -e "    ${CYAN}zo-tunnel-server setup --domain YOUR_DOMAIN${NC}"
-    echo ""
-    echo "  Start server:"
-    echo -e "    ${CYAN}zo-tunnel-server start${NC}"
+    echo "  Manage server:"
+    echo -e "    ${CYAN}zo-tunnel-server stop${NC}"
+    echo -e "    ${CYAN}zo-tunnel-server restart${NC}"
+    echo -e "    ${CYAN}zo-tunnel-server logs -f${NC}"
+    echo -e "    ${CYAN}zo-tunnel-server status${NC}"
     echo ""
 fi
 

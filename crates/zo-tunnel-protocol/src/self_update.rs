@@ -1,7 +1,10 @@
-//! Self-update and uninstall utilities shared by server and client binaries.
+//! Self-update, uninstall, and systemd service management utilities
+//! shared by server and client binaries.
 //!
 //! - `upgrade()` — download the latest release from GitHub and replace the running binary
 //! - `uninstall()` — remove binary, config, and systemd service
+//! - `install_systemd_service()` — create and enable systemd service
+//! - `start_service()` / `stop_service()` / `restart_service()` — manage service lifecycle
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -270,6 +273,133 @@ pub fn uninstall(
     println!();
 
     Ok(())
+}
+
+// ─── Systemd service management ──────────────────────────────────
+
+const SERVICE_NAME: &str = "zo-tunnel";
+const SERVICE_PATH: &str = "/etc/systemd/system/zo-tunnel.service";
+
+/// Generate the systemd unit file content.
+fn systemd_unit_content(binary_path: &str) -> String {
+    format!(
+        "[Unit]\n\
+         Description=Zo Tunnel Server\n\
+         After=network.target\n\
+         \n\
+         [Service]\n\
+         Type=simple\n\
+         ExecStart={binary_path} start --foreground\n\
+         Restart=on-failure\n\
+         RestartSec=5\n\
+         StandardOutput=journal\n\
+         StandardError=journal\n\
+         \n\
+         [Install]\n\
+         WantedBy=multi-user.target\n"
+    )
+}
+
+/// Install and enable the systemd service for zo-tunnel-server.
+/// Creates the service file and runs `systemctl daemon-reload && enable`.
+pub fn install_systemd_service() -> anyhow::Result<()> {
+    let binary_path = format!("{}/zo-tunnel-server", INSTALL_DIR);
+
+    // Also accept the binary at the current executable path
+    let exec_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from))
+        .unwrap_or(binary_path);
+
+    let unit = systemd_unit_content(&exec_path);
+
+    // Write service file (needs root)
+    let service_path = Path::new(SERVICE_PATH);
+    match std::fs::write(service_path, &unit) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            info("Need elevated privileges to install service...");
+            let status = Command::new("sudo")
+                .args(["tee", SERVICE_PATH])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .and_then(|mut child| {
+                    use std::io::Write;
+                    if let Some(ref mut stdin) = child.stdin {
+                        stdin.write_all(unit.as_bytes())?;
+                    }
+                    child.wait()
+                })?;
+            if !status.success() {
+                anyhow::bail!("Failed to write systemd service file");
+            }
+        }
+        Err(e) => return Err(e.into()),
+    }
+
+    // Reload systemd
+    let _ = Command::new("sudo")
+        .args(["systemctl", "daemon-reload"])
+        .status();
+
+    // Enable service
+    let _ = Command::new("sudo")
+        .args(["systemctl", "enable", SERVICE_NAME])
+        .status();
+
+    ok("Systemd service installed and enabled");
+    Ok(())
+}
+
+/// Start the zo-tunnel systemd service.
+pub fn start_service() -> anyhow::Result<()> {
+    let status = Command::new("sudo")
+        .args(["systemctl", "start", SERVICE_NAME])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("Failed to start {SERVICE_NAME} service");
+    }
+    ok("Service started");
+    Ok(())
+}
+
+/// Stop the zo-tunnel systemd service.
+pub fn stop_service() -> anyhow::Result<()> {
+    let status = Command::new("sudo")
+        .args(["systemctl", "stop", SERVICE_NAME])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("Failed to stop {SERVICE_NAME} service");
+    }
+    ok("Service stopped");
+    Ok(())
+}
+
+/// Restart the zo-tunnel systemd service.
+pub fn restart_service() -> anyhow::Result<()> {
+    let status = Command::new("sudo")
+        .args(["systemctl", "restart", SERVICE_NAME])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("Failed to restart {SERVICE_NAME} service");
+    }
+    ok("Service restarted");
+    Ok(())
+}
+
+/// Check if the zo-tunnel systemd service is active.
+pub fn is_service_active() -> bool {
+    Command::new("systemctl")
+        .args(["is-active", "--quiet", SERVICE_NAME])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Check if the systemd service file exists.
+pub fn is_service_installed() -> bool {
+    Path::new(SERVICE_PATH).exists()
 }
 
 // ─── File helpers ────────────────────────────────────────────────

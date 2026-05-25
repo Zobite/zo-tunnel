@@ -23,15 +23,21 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Initial setup — configure tokens and ports.
-    /// Saves config to /etc/zo-tunnel/server.yaml (or ~/.config/zo-tunnel/).
-    Setup(SetupArgs),
+    /// Start the tunnel server. Auto-creates config on first run.
+    /// Example: zo-tunnel-server start --domain tunnel.example.com
+    Start(StartArgs),
 
-    /// Start the tunnel server using saved config.
-    Start,
+    /// Stop the tunnel server service.
+    Stop,
+
+    /// Restart the tunnel server service.
+    Restart,
 
     /// Show current server configuration and status.
     Status,
+
+    /// View server logs (journalctl).
+    Logs(LogsArgs),
 
     /// Print a ready-to-copy client connect command.
     ClientCmd(ClientCmdArgs),
@@ -44,11 +50,12 @@ enum Command {
 }
 
 #[derive(Parser, Debug)]
-struct SetupArgs {
+struct StartArgs {
     /// Base domain for subdomain routing (e.g. tunnel.zobite.com).
     /// Each client will be accessible at <client_id>.<domain>.
+    /// Required on first run; optional afterwards.
     #[arg(long)]
-    domain: String,
+    domain: Option<String>,
 
     /// Authentication token for tunnel clients.
     /// If omitted, a secure random token is auto-generated.
@@ -84,6 +91,22 @@ struct SetupArgs {
     /// Specify the Traefik dynamic config directory (e.g. /etc/traefik/dynamic).
     #[arg(long)]
     traefik_dir: Option<String>,
+
+    /// Run in foreground mode (for debugging or systemd).
+    /// Default: install and start as systemd service.
+    #[arg(long)]
+    foreground: bool,
+}
+
+#[derive(Parser, Debug)]
+struct LogsArgs {
+    /// Number of recent log lines to show (default: 50)
+    #[arg(long, short, default_value_t = 50)]
+    lines: u32,
+
+    /// Follow log output in real-time
+    #[arg(long, short)]
+    follow: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -113,43 +136,106 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Setup(args) => cmd_setup(args),
-        Command::Start => cmd_start().await,
+        Command::Start(args) => cmd_start(args).await,
+        Command::Stop => cmd_stop(),
+        Command::Restart => cmd_restart(),
         Command::Status => cmd_status(),
+        Command::Logs(args) => cmd_logs(args),
         Command::ClientCmd(args) => cmd_client_cmd(args),
         Command::Upgrade => cmd_upgrade(),
         Command::Uninstall(args) => cmd_uninstall(args),
     }
 }
 
-/// `zo-tunnel-server setup` — generate config and save to disk.
-fn cmd_setup(args: SetupArgs) -> Result<()> {
-    // Check for existing config
-    let config_path = config::ServerConfig::config_path();
-    if config_path.exists() && !args.force {
-        eprintln!("⚠️  Config already exists at: {}", config_path.display());
-        eprintln!("   Use --force to overwrite.");
-        std::process::exit(1);
+/// `zo-tunnel-server start` — setup config if needed, then start server.
+///
+/// - First run: requires `--domain`, creates config, installs systemd service, starts it.
+/// - Subsequent runs: loads existing config and starts the service.
+/// - With `--foreground`: runs the server in foreground (used by systemd or for debugging).
+async fn cmd_start(args: StartArgs) -> Result<()> {
+    // ── Foreground mode: just run the server directly ──
+    if args.foreground {
+        return run_foreground().await;
     }
 
-    // Generate or use provided tokens
+    // ── Ensure config exists ──
+    let config_path = config::ServerConfig::resolve_config_path();
+    let (cfg, config_created) = if let Some(ref path) = config_path {
+        if args.domain.is_some() && !args.force {
+            eprintln!("⚠️  Config already exists at: {}", path.display());
+            eprintln!("   Use --force to overwrite, or just run: zo-tunnel-server start");
+            std::process::exit(1);
+        }
+
+        if args.domain.is_some() && args.force {
+            // Re-create config with new settings
+            let cfg = create_config(&args)?;
+            (cfg, true)
+        } else {
+            // Load existing config
+            let cfg = config::ServerConfig::load(path)
+                .context("load config")?;
+            (cfg, false)
+        }
+    } else {
+        // No config exists — domain is required
+        if args.domain.is_none() {
+            eprintln!("❌ No config found. Domain is required on first run.");
+            eprintln!();
+            eprintln!("  Usage: zo-tunnel-server start --domain YOUR_DOMAIN");
+            eprintln!();
+            eprintln!("  Example:");
+            eprintln!("    zo-tunnel-server start --domain tunnel.zobite.com");
+            std::process::exit(1);
+        }
+
+        let cfg = create_config(&args)?;
+        (cfg, true)
+    };
+
+    // ── Install systemd service if not yet installed ──
+    if !zo_tunnel_protocol::self_update::is_service_installed() {
+        zo_tunnel_protocol::self_update::install_systemd_service()
+            .context("install systemd service")?;
+    }
+
+    // ── Start or restart the service ──
+    if zo_tunnel_protocol::self_update::is_service_active() {
+        zo_tunnel_protocol::self_update::restart_service()
+            .context("restart service")?;
+    } else {
+        zo_tunnel_protocol::self_update::start_service()
+            .context("start service")?;
+    }
+
+    // ── Print summary ──
+    print_summary(&cfg, config_created);
+
+    Ok(())
+}
+
+/// Create config from StartArgs and save to disk.
+fn create_config(args: &StartArgs) -> Result<config::ServerConfig> {
+    let domain = args.domain.as_deref().expect("domain must be set");
+
     let client_token = args
         .token
+        .clone()
         .unwrap_or_else(|| config::ServerConfig::generate_token(24));
 
     let dashboard_token = args
         .dashboard_token
+        .clone()
         .unwrap_or_else(|| config::ServerConfig::generate_token(16));
 
-    // Build config
     let mut cfg = config::ServerConfig {
-        domain: args.domain,
+        domain: domain.to_string(),
         control_port: args.control_port,
         public_port: args.public_port,
         ..Default::default()
     };
-    cfg.auth.tokens = vec![client_token.clone()];
-    cfg.dashboard_auth.token = dashboard_token.clone();
+    cfg.auth.tokens = vec![client_token];
+    cfg.dashboard_auth.token = dashboard_token;
 
     // TLS
     if let Some(ref cert) = args.tls_cert {
@@ -166,17 +252,23 @@ fn cmd_setup(args: SetupArgs) -> Result<()> {
         cfg.traefik.config_dir = dir.clone();
     }
 
-    // Save
-    let saved_path = cfg.save().context("save config")?;
+    cfg.save().context("save config")?;
+    Ok(cfg)
+}
 
-    // Print summary
+/// Print server summary after start.
+fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
     println!();
     println!("╔══════════════════════════════════════╗");
-    println!("║     Zo Tunnel Server — Setup Done    ║");
+    println!("║       Zo Tunnel Server — Started     ║");
     println!("╚══════════════════════════════════════╝");
     println!();
-    println!("  Config saved to: {}", saved_path.display());
-    println!();
+
+    if config_created {
+        println!("  Config saved to: {}", config::ServerConfig::config_path().display());
+        println!();
+    }
+
     println!("  Domain:          *.{}", cfg.domain);
     println!("  Control port:    {}", cfg.control_port);
     println!("  Public port:     {}", cfg.public_port);
@@ -186,27 +278,38 @@ fn cmd_setup(args: SetupArgs) -> Result<()> {
         println!("  Traefik:         enabled ({})", cfg.traefik.config_dir);
     }
     println!();
-    println!("  🔑 Client token:     {}", client_token);
-    println!("  🔑 Dashboard token:  {}", dashboard_token);
-    println!();
-    println!("  ▸ Start server:  zo-tunnel-server start");
-    println!("  ▸ Connect client:");
-    println!("    zo-tunnel-client --server <VPS_IP>:{} \\", cfg.control_port);
-    println!("      --id my-api --local localhost:3000 \\");
-    println!("      --token {}", client_token);
-    println!();
-    println!("  ▸ Access tunnel:    http://my-api.{}", cfg.domain);
-    println!("  ▸ Dashboard:        http://dashboard.{}", cfg.domain);
-    println!();
-    println!("  ▸ DNS setup (required):");
-    println!("    Add a wildcard A record: *.{} → <VPS_IP>", cfg.domain);
-    println!();
 
-    Ok(())
+    if config_created {
+        // Show tokens only on first setup
+        let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
+        let dashboard_token = &cfg.dashboard_auth.token;
+
+        println!("  🔑 Client token:     {}", client_token);
+        println!("  🔑 Dashboard token:  {}", dashboard_token);
+        println!();
+        println!("  ▸ Connect client:");
+        println!("    zo-tunnel-client --server <VPS_IP>:{} \\", cfg.control_port);
+        println!("      --id my-api --local localhost:3000 \\");
+        println!("      --token {}", client_token);
+        println!();
+        println!("  ▸ Access tunnel:    http://my-api.{}", cfg.domain);
+        println!("  ▸ Dashboard:        http://dashboard.{}", cfg.domain);
+        println!();
+        println!("  ▸ DNS setup (required):");
+        println!("    Add a wildcard A record: *.{} → <VPS_IP>", cfg.domain);
+        println!();
+    }
+
+    println!("  ▸ Service management:");
+    println!("    zo-tunnel-server stop");
+    println!("    zo-tunnel-server restart");
+    println!("    zo-tunnel-server logs -f");
+    println!("    zo-tunnel-server status");
+    println!();
 }
 
-/// `zo-tunnel-server start` — load saved config and run server.
-async fn cmd_start() -> Result<()> {
+/// Run the server in foreground mode (used by systemd or for debugging).
+async fn run_foreground() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -235,13 +338,63 @@ async fn cmd_start() -> Result<()> {
     Ok(())
 }
 
+/// `zo-tunnel-server stop` — stop the systemd service.
+fn cmd_stop() -> Result<()> {
+    if !zo_tunnel_protocol::self_update::is_service_active() {
+        println!("ℹ️  Service is not running.");
+        return Ok(());
+    }
+    zo_tunnel_protocol::self_update::stop_service()
+        .context("stop service")?;
+    println!("  Zo Tunnel Server stopped.");
+    Ok(())
+}
+
+/// `zo-tunnel-server restart` — restart the systemd service.
+fn cmd_restart() -> Result<()> {
+    if !zo_tunnel_protocol::self_update::is_service_installed() {
+        eprintln!("❌ Service not installed. Run `zo-tunnel-server start --domain <domain>` first.");
+        std::process::exit(1);
+    }
+    zo_tunnel_protocol::self_update::restart_service()
+        .context("restart service")?;
+    println!("  Zo Tunnel Server restarted.");
+    Ok(())
+}
+
+/// `zo-tunnel-server logs` — view server logs via journalctl.
+fn cmd_logs(args: LogsArgs) -> Result<()> {
+    let mut cmd_args = vec![
+        "-u".to_string(),
+        "zo-tunnel".to_string(),
+        "-n".to_string(),
+        args.lines.to_string(),
+        "--no-pager".to_string(),
+    ];
+
+    if args.follow {
+        cmd_args.push("-f".to_string());
+    }
+
+    let status = std::process::Command::new("journalctl")
+        .args(&cmd_args)
+        .status()
+        .context("Failed to run journalctl. Is systemd available?")?;
+
+    if !status.success() {
+        anyhow::bail!("journalctl exited with error");
+    }
+
+    Ok(())
+}
+
 /// `zo-tunnel-server status` — show current config.
 fn cmd_status() -> Result<()> {
     let config_path = match config::ServerConfig::resolve_config_path() {
         Some(p) => p,
         None => {
             println!("❌ No config found.");
-            println!("   Run `zo-tunnel-server setup --domain <domain>` first.");
+            println!("   Run `zo-tunnel-server start --domain <domain>` first.");
             return Ok(());
         }
     };
@@ -249,11 +402,21 @@ fn cmd_status() -> Result<()> {
     let cfg = config::ServerConfig::load(&config_path)
         .context("load config")?;
 
+    // Check service status
+    let service_status = if zo_tunnel_protocol::self_update::is_service_active() {
+        "🟢 running"
+    } else if zo_tunnel_protocol::self_update::is_service_installed() {
+        "🔴 stopped"
+    } else {
+        "⚪ not installed"
+    };
+
     println!();
     println!("╔══════════════════════════════════════╗");
     println!("║    Zo Tunnel Server — Status         ║");
     println!("╚══════════════════════════════════════╝");
     println!();
+    println!("  Service:         {}", service_status);
     println!("  Config:          {}", config_path.display());
     println!("  Domain:          *.{}", cfg.domain);
     println!("  Control port:    {}", cfg.control_port);
@@ -288,7 +451,7 @@ fn cmd_client_cmd(args: ClientCmdArgs) -> Result<()> {
         Some(p) => p,
         None => {
             println!("❌ No config found.");
-            println!("   Run `zo-tunnel-server setup --domain <domain>` first.");
+            println!("   Run `zo-tunnel-server start --domain <domain>` first.");
             return Ok(());
         }
     };
@@ -298,7 +461,7 @@ fn cmd_client_cmd(args: ClientCmdArgs) -> Result<()> {
 
     if cfg.auth.tokens.is_empty() {
         println!("❌ No client tokens configured.");
-        println!("   Run `zo-tunnel-server setup --domain <domain>` to generate one.");
+        println!("   Run `zo-tunnel-server start --domain <domain>` to generate one.");
         return Ok(());
     }
 
