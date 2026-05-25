@@ -68,7 +68,7 @@ fn fetch_latest_version() -> anyhow::Result<String> {
     let tag = body
         .split("\"tag_name\"")
         .nth(1)
-        .and_then(|s| s.split('"').nth(2))
+        .and_then(|s| s.split('"').nth(1))
         .ok_or_else(|| anyhow::anyhow!("Could not parse release tag from GitHub API response"))?;
 
     Ok(tag.to_string())
