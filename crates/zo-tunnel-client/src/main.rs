@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use std::os::unix::process::CommandExt;
 use tracing_subscriber::EnvFilter;
 
@@ -173,8 +173,13 @@ async fn main() -> Result<()> {
         Some(Command::Upgrade) => cmd_upgrade(),
         Some(Command::Uninstall(args)) => cmd_uninstall(args),
         Some(Command::Foreground(args)) => cmd_foreground(args.bind, args.port).await,
-        // Backward compat: bare `zo-tunnel-client` runs foreground
-        None => cmd_foreground("127.0.0.1".into(), 16200).await,
+        // Show help if no subcommand is provided
+        None => {
+            let mut cmd = Cli::command();
+            cmd.print_help()?;
+            println!();
+            Ok(())
+        }
     }
 }
 
