@@ -8,6 +8,7 @@ mod metrics;
 mod proxy;
 mod registry;
 mod server;
+mod traefik;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -78,6 +79,11 @@ struct SetupArgs {
     /// Overwrite existing config without asking
     #[arg(long)]
     force: bool,
+
+    /// Enable Traefik integration — auto-create route configs per client.
+    /// Specify the Traefik dynamic config directory (e.g. /etc/traefik/dynamic).
+    #[arg(long)]
+    traefik_dir: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -154,6 +160,12 @@ fn cmd_setup(args: SetupArgs) -> Result<()> {
         cfg.tls.key = key.clone();
     }
 
+    // Traefik integration
+    if let Some(ref dir) = args.traefik_dir {
+        cfg.traefik.enabled = true;
+        cfg.traefik.config_dir = dir.clone();
+    }
+
     // Save
     let saved_path = cfg.save().context("save config")?;
 
@@ -170,6 +182,9 @@ fn cmd_setup(args: SetupArgs) -> Result<()> {
     println!("  Public port:     {}", cfg.public_port);
     println!("  Dashboard:       dashboard.{}", cfg.domain);
     println!("  TLS:             {}", if cfg.tls.enabled { "enabled" } else { "disabled" });
+    if cfg.traefik.enabled {
+        println!("  Traefik:         enabled ({})", cfg.traefik.config_dir);
+    }
     println!();
     println!("  🔑 Client token:     {}", client_token);
     println!("  🔑 Dashboard token:  {}", dashboard_token);
@@ -247,6 +262,11 @@ fn cmd_status() -> Result<()> {
     println!("  TLS:             {}", if cfg.tls.enabled { "enabled" } else { "disabled" });
     println!("  Client tokens:   {} configured", cfg.auth.tokens.len());
     println!("  Dashboard auth:  {}", if cfg.dashboard_auth_enabled() { "enabled" } else { "disabled" });
+    if cfg.traefik.enabled {
+        println!("  Traefik:         enabled ({})", cfg.traefik.config_dir);
+    } else {
+        println!("  Traefik:         disabled");
+    }
     println!();
 
     for (i, token) in cfg.auth.tokens.iter().enumerate() {
@@ -298,11 +318,7 @@ fn cmd_client_cmd(args: ClientCmdArgs) -> Result<()> {
     println!();
     println!("  Copy and run on your local machine:");
     println!();
-    println!("  zo-tunnel-client \\");
-    println!("    --server {} \\", server_addr);
-    println!("    --token {} \\", token);
-    println!("    --id {} \\", args.id);
-    println!("    --local {}", args.local);
+    println!("  zo-tunnel-client --server {} --token {} --id {} --local {}", server_addr, token, args.id, args.local);
     println!();
 
     if !cfg.domain.is_empty() {

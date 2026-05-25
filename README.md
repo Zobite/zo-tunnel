@@ -18,6 +18,7 @@ flowchart LR
 
 - 🌐 **Subdomain routing** — `myapp.tunnel.example.com` for each client
 - 🔒 **Token-based auth** — configurable list of valid tokens
+- 💾 **Login once, connect forever** — save credentials locally after first auth
 - ⚡ **Yamux multiplexing** — multiple streams over a single TCP connection
 - 📊 **Live dashboard** — real-time web UI at `dashboard.<domain>`
 - 🔐 **TLS control channel** — optional TLS for client ↔ server communication
@@ -92,14 +93,37 @@ Add a wildcard A record pointing to your VPS:
 curl -sSL https://raw.githubusercontent.com/Zobite/zo-tunnel/main/scripts/install.sh | bash -s client
 ```
 
-### 4. Connect
+### 4. Login (one time only)
+
+Save your server credentials so you never have to type them again:
 
 ```bash
-zo-tunnel-client \
-  --server YOUR_VPS_IP:6200 \
-  --local localhost:3000 \
-  --id my-api \
-  --token YOUR_TOKEN
+zo-tunnel-client login --server YOUR_VPS_IP:6200 --token YOUR_TOKEN
+```
+
+```
+✅ Credentials saved to ~/.zo-tunnel/credentials.yaml
+
+  Server: YOUR_VPS_IP:6200
+  Token:  YOUR_****
+  TLS:    disabled
+
+  You can now connect without --server and --token:
+    zo-tunnel-client connect --local localhost:3000 --id my-app
+```
+
+### 5. Connect
+
+```bash
+zo-tunnel-client connect --local localhost:3000 --id my-api
+```
+
+```
+✅ Authenticated!
+┌──────────────────────────────────────────┐
+│  🌐 Tunnel: http://my-api.tunnel.example.com
+└──────────────────────────────────────────┘
+🚇 Tunnel active — waiting for connections...
 ```
 
 Access at: `http://my-api.tunnel.example.com` 🎉
@@ -107,16 +131,19 @@ Access at: `http://my-api.tunnel.example.com` 🎉
 ### Multi-client example
 
 ```bash
+# Login once
+zo-tunnel-client login --server vps:6200 --token secret
+
 # Web frontend
-zo-tunnel-client --server vps:6200 --id webapp --local localhost:3000 --token secret
+zo-tunnel-client connect --id webapp --local localhost:3000
 # → http://webapp.tunnel.example.com
 
 # API server
-zo-tunnel-client --server vps:6200 --id api --local localhost:8080 --token secret
+zo-tunnel-client connect --id api --local localhost:8080
 # → http://api.tunnel.example.com
 
 # Ollama
-zo-tunnel-client --server vps:6200 --id ollama --local localhost:11434 --token secret
+zo-tunnel-client connect --id ollama --local localhost:11434
 # → http://ollama.tunnel.example.com
 ```
 
@@ -124,28 +151,56 @@ zo-tunnel-client --server vps:6200 --id ollama --local localhost:11434 --token s
 
 ## 🔒 Traefik + SSL (Recommended)
 
-For production with HTTPS, put [Traefik](https://traefik.io/) in front of zo-tunnel's public port:
+For production with HTTPS, put [Traefik](https://traefik.io/) in front of zo-tunnel's public port.
 
-```yaml
-# traefik dynamic config
-http:
-  routers:
-    zo-tunnel:
-      rule: "HostRegexp(`{subdomain:.+}.tunnel.example.com`)"
-      service: zo-tunnel
-      tls:
-        certResolver: letsencrypt
-        domains:
-          - main: "tunnel.example.com"
-            sans: ["*.tunnel.example.com"]
-  services:
-    zo-tunnel:
-      loadBalancer:
-        servers:
-          - url: "http://127.0.0.1:6210"
+Zo Tunnel tự động tạo/xóa Traefik config file cho mỗi client khi connect/disconnect. Traefik detect thay đổi và provision SSL cert cho từng subdomain tự động (HTTP-01 challenge — **không cần DNS API**).
+
+```bash
+# Setup server với Traefik integration
+zo-tunnel-server setup --domain tunnel.example.com --traefik-dir /etc/traefik/dynamic
 ```
 
-All tunnels get **HTTPS automatically** via Let's Encrypt wildcard cert. No per-client configuration needed.
+**Traefik static config (`traefik.yml`):**
+
+```yaml
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "your-email@example.com"
+      storage: "/letsencrypt/acme.json"
+      httpChallenge:
+        entryPoint: web
+
+providers:
+  file:
+    directory: "/etc/traefik/dynamic"
+    watch: true
+```
+
+Xong! Khi client connect:
+
+```
+Client connect --id my-api
+  → Server tạo /etc/traefik/dynamic/zo-my-api.yml
+  → Traefik detect → provision cert → https://my-api.tunnel.example.com ✅
+
+Client disconnect
+  → Server xóa /etc/traefik/dynamic/zo-my-api.yml
+  → Traefik remove route
+```
+
+> **DNS setup:** Cần A record cho mỗi subdomain trỏ về VPS (hoặc wildcard `*.tunnel.example.com → VPS_IP`).
 
 ---
 
@@ -204,29 +259,84 @@ zo-tunnel-server uninstall --keep-config  # preserve /etc/zo-tunnel/
 | `--yes` / `-y` | Skip confirmation prompt |
 | `--keep-config` | Keep config files, only remove binary and service |
 
+---
+
 ### Client
+
+#### `zo-tunnel-client login`
+
+Save server credentials locally for future connections. Only needs to be run once.
+
+```bash
+zo-tunnel-client login --server vps:6200 --token YOUR_TOKEN
+
+# With TLS
+zo-tunnel-client login --server vps:6200 --token YOUR_TOKEN --tls
+```
+
+| Flag | Env var | Description |
+|---|---|---|
+| `--server` | `ZO_SERVER` | Server address (`host:port`) — required |
+| `--token` | `ZO_TOKEN` | Auth token — required |
+| `--tls` | `ZO_TLS` | Enable TLS for control channel |
+| `--tls-server-name` | — | Server name for TLS SNI |
+| `--tls-skip-verify` | — | Skip TLS cert verification (⚠️ dev only) |
+
+Credentials are saved to `~/.zo-tunnel/credentials.yaml` with `0600` permissions.
 
 #### `zo-tunnel-client [connect]`
 
 Connect to the tunnel server. The `connect` subcommand is optional — you can use the flags directly.
 
 ```bash
-# Both are equivalent:
-zo-tunnel-client --server vps:6200 --local localhost:3000 --id my-app --token SECRET
-zo-tunnel-client connect --server vps:6200 --local localhost:3000 --id my-app --token SECRET
+# After login — no --server or --token needed
+zo-tunnel-client connect --local localhost:3000 --id my-app
+
+# Or without subcommand (backward compatible)
+zo-tunnel-client --local localhost:3000 --id my-app
+
+# Override saved credentials with CLI flags
+zo-tunnel-client connect --server other:6200 --token OTHER_TOKEN --local localhost:3000
 ```
 
 | Flag | Env var | Default | Description |
 |---|---|---|---|
-| `--server` | `ZO_SERVER` | — | Server address (`host:port`) |
+| `--server` | `ZO_SERVER` | *(from login)* | Server address (`host:port`) |
 | `--local` | `ZO_LOCAL` | `localhost:3000` | Local service to forward to |
 | `--id` | `ZO_CLIENT_ID` | `default` | Tunnel name (becomes subdomain) |
-| `--token` | `ZO_TOKEN` | — | Auth token |
+| `--token` | `ZO_TOKEN` | *(from login)* | Auth token |
 | `--config` / `-c` | `ZO_CONFIG` | — | Path to YAML config file |
 | `--no-reconnect` | — | `false` | Disable auto-reconnect |
 | `--tls` | `ZO_TLS` | `false` | Enable TLS for control channel |
 | `--tls-server-name` | — | *(from --server)* | Server name for TLS SNI |
 | `--tls-skip-verify` | — | `false` | Skip TLS cert verification (⚠️ dev only) |
+
+**Config priority:** CLI flags > Environment variables > Config file (`--config`) > Saved credentials (`~/.zo-tunnel/`)
+
+#### `zo-tunnel-client status`
+
+Show saved credentials and connection info.
+
+```bash
+zo-tunnel-client status
+```
+
+```
+Zo Tunnel Client v0.4.2
+
+📁 Credentials: /home/user/.zo-tunnel/credentials.yaml
+  Server: vps:6200
+  Token:  YOUR****
+  TLS:    disabled
+```
+
+#### `zo-tunnel-client logout`
+
+Remove saved credentials.
+
+```bash
+zo-tunnel-client logout
+```
 
 #### `zo-tunnel-client upgrade`
 
@@ -238,7 +348,7 @@ zo-tunnel-client upgrade
 
 #### `zo-tunnel-client uninstall`
 
-Remove the client binary.
+Remove the client binary and saved credentials.
 
 ```bash
 zo-tunnel-client uninstall           # interactive confirmation
@@ -276,10 +386,36 @@ tls:
   cert: "/etc/zo-tunnel/server.crt"
   key: "/etc/zo-tunnel/server.key"
 
+# Optional Traefik integration — auto SSL per client
+traefik:
+  enabled: false
+  config_dir: "/etc/traefik/dynamic"
+  entrypoint: "websecure"
+  cert_resolver: "letsencrypt"
+
 log_level: "info"
 ```
 
 ### Client
+
+#### Option 1: Login (recommended)
+
+```bash
+zo-tunnel-client login --server vps:6200 --token your-token
+```
+
+Saves to `~/.zo-tunnel/credentials.yaml`:
+
+```yaml
+server: "vps:6200"
+token: "your-token"
+tls:
+  enabled: false
+  server_name: ""
+  skip_verify: false
+```
+
+#### Option 2: YAML config file
 
 ```yaml
 server: "vps-ip:6200"
@@ -297,6 +433,10 @@ reconnect:
 #   skip_verify: false
 ```
 
+```bash
+zo-tunnel-client --config client.yaml
+```
+
 ---
 
 ## 🔌 Protocol
@@ -310,7 +450,7 @@ sequenceDiagram
 
     C->>S: TCP Connect
     C->>S: AUTH_REQ {client_id, token}
-    S-->>C: AUTH_RES {ok, route}
+    S-->>C: AUTH_RES {ok, route, domain}
     Note over C,S: Upgrade to yamux session
     Note over C,S: 🚇 Multiplexed tunnel ready
 ```
@@ -374,14 +514,19 @@ zo-tunnel-server setup \
   --tls-cert /path/to/fullchain.pem \
   --tls-key /path/to/privkey.pem
 
-# Client: connect with TLS
-zo-tunnel-client --server tunnel.example.com:6200 \
-  --local localhost:3000 --id my-app --token YOUR_TOKEN \
+# Client: login with TLS
+zo-tunnel-client login \
+  --server tunnel.example.com:6200 \
+  --token YOUR_TOKEN \
   --tls
 
+# Client: connect (TLS saved from login)
+zo-tunnel-client connect --local localhost:3000 --id my-app
+
 # Client: self-signed cert (dev only)
-zo-tunnel-client --server 192.168.1.100:6200 \
-  --local localhost:3000 --id my-app --token YOUR_TOKEN \
+zo-tunnel-client login \
+  --server 192.168.1.100:6200 \
+  --token YOUR_TOKEN \
   --tls --tls-skip-verify
 ```
 
@@ -413,12 +558,13 @@ zo-tunnel/
 │   │       ├── registry.rs       #   Client registry (DashMap)
 │   │       ├── proxy.rs          #   HTTP reverse proxy
 │   │       ├── dashboard.rs      #   REST API + embedded UI
-│   │       └── metrics.rs        #   Metrics + rate limiter
+│   │       ├── metrics.rs        #   Metrics + rate limiter
+│   │       └── traefik.rs        #   Auto Traefik config per client
 │   │
 │   └── zo-tunnel-client/         # Client binary
 │       └── src/
-│           ├── main.rs           #   CLI: connect / upgrade / uninstall
-│           ├── config.rs         #   YAML config
+│           ├── main.rs           #   CLI: connect / login / logout / status / upgrade
+│           ├── config.rs         #   YAML config + saved credentials
 │           └── client.rs         #   Auth, yamux, stream proxy
 │
 ├── configs/                      # Example YAML configs

@@ -33,6 +33,9 @@ pub struct ServerConfig {
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
 
+    #[serde(default)]
+    pub traefik: TraefikConfig,
+
     #[serde(default = "default_log_level")]
     pub log_level: String,
 }
@@ -94,6 +97,43 @@ impl Default for RateLimitConfig {
     }
 }
 
+/// Traefik integration — auto-create/delete per-client route config files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraefikConfig {
+    /// Enable Traefik integration
+    #[serde(default)]
+    pub enabled: bool,
+    /// Directory for Traefik dynamic config files (e.g. /etc/traefik/dynamic/)
+    #[serde(default = "default_traefik_dir")]
+    pub config_dir: String,
+    /// Traefik entrypoint name
+    #[serde(default = "default_traefik_entrypoint")]
+    pub entrypoint: String,
+    /// Traefik certificate resolver name
+    #[serde(default = "default_traefik_cert_resolver")]
+    pub cert_resolver: String,
+}
+
+impl Default for TraefikConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            config_dir: default_traefik_dir(),
+            entrypoint: default_traefik_entrypoint(),
+            cert_resolver: default_traefik_cert_resolver(),
+        }
+    }
+}
+
+fn default_traefik_dir() -> String {
+    "/etc/traefik/dynamic".into()
+}
+fn default_traefik_entrypoint() -> String {
+    "websecure".into()
+}
+fn default_traefik_cert_resolver() -> String {
+    "letsencrypt".into()
+}
 
 fn default_control_port() -> u16 {
     zo_tunnel_protocol::DEFAULT_CONTROL_PORT
@@ -124,6 +164,7 @@ impl Default for ServerConfig {
             auth: AuthConfig::default(),
             dashboard_auth: DashboardAuthConfig::default(),
             rate_limit: RateLimitConfig::default(),
+            traefik: TraefikConfig::default(),
             log_level: default_log_level(),
         }
     }

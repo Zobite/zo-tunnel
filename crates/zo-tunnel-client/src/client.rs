@@ -138,11 +138,17 @@ impl Client {
                 if !res.success {
                     bail!("Authentication failed: {}", res.message);
                 }
-                tracing::info!(
-                    "✅ Authenticated! Route: {} | Public port: {}",
-                    res.assigned_route.as_deref().unwrap_or("-"),
-                    res.public_port.unwrap_or(0)
-                );
+
+                // Extract domain from server message (format: "OK — <client_id>.<domain>")
+                let tunnel_url = res
+                    .message
+                    .strip_prefix("OK — ")
+                    .unwrap_or(res.assigned_route.as_deref().unwrap_or("-"));
+
+                tracing::info!("✅ Authenticated!");
+                tracing::info!("┌──────────────────────────────────────────┐");
+                tracing::info!("│  🌐 Tunnel: http://{}  ", tunnel_url);
+                tracing::info!("└──────────────────────────────────────────┘");
             }
             other => {
                 bail!("Expected AuthRes, got {:?}", other);
