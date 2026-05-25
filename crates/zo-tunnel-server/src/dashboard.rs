@@ -162,6 +162,19 @@ struct AuthCheckResponse {
     tls_enabled: bool,
 }
 
+/// Helper to detect if TLS is enabled (natively or via reverse proxy like Traefik/Nginx).
+fn is_tls_enabled(state: &DashboardState, headers: &HeaderMap) -> bool {
+    if state.tls_enabled {
+        return true;
+    }
+    if let Some(proto) = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) {
+        if proto.trim().eq_ignore_ascii_case("https") {
+            return true;
+        }
+    }
+    false
+}
+
 async fn api_login(
     State(state): State<DashboardState>,
     headers: HeaderMap,
@@ -198,10 +211,11 @@ async fn api_login(
 
     if check_cfg.validate_dashboard_token(&payload.token) {
         let session_id = state.sessions.create();
+        let tls_enabled = is_tls_enabled(&state, &headers);
         let cookie = build_session_cookie(
             &session_id,
             state.sessions.ttl_secs,
-            state.tls_enabled,
+            tls_enabled,
         );
 
         let mut resp_headers = HeaderMap::new();
@@ -241,7 +255,7 @@ async fn api_auth_check(
     Json(AuthCheckResponse {
         authenticated: is_authenticated(&state, &headers),
         auth_required: state.auth_enabled,
-        tls_enabled: state.tls_enabled,
+        tls_enabled: is_tls_enabled(&state, &headers),
     })
 }
 
