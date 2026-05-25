@@ -270,7 +270,8 @@ RELEASE_NOTES="## Install
 
 **Server (Linux VPS):**
 \`\`\`bash
-curl -sSL https://raw.githubusercontent.com/${REPO}/main/scripts/setup-server.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sudo bash -s server
+zo-tunnel-server start --domain tunnel.example.com
 \`\`\`
 
 **Client (macOS / Linux):**

@@ -414,7 +414,7 @@ fn cmd_status() -> Result<()> {
     println!("  Dashboard auth:  {}", if cfg.dashboard_auth_enabled() { "enabled" } else { "disabled" });
     println!();
 
-    // Show tokens and connect info
+    // Show tokens and access info
     let server_ip = detect_server_ip();
     let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
     let scheme = if cfg.traefik.enabled { "https" } else { "http" };
@@ -422,14 +422,9 @@ fn cmd_status() -> Result<()> {
     println!("  🔑 Client token:     {}", client_token);
     println!("  🔑 Dashboard token:  {}", &cfg.dashboard_auth.token);
     println!();
-    println!("  ▸ Login (save credentials):");
-    println!("    zo-tunnel-client login --server {}:{} --token {}", server_ip, cfg.control_port, client_token);
-    println!();
-    println!("  ▸ Connect:");
-    println!("    zo-tunnel-client connect --server {}:{} --token {} --id my-api --local localhost:3000", server_ip, cfg.control_port, client_token);
-    println!();
-    println!("  ▸ Access tunnel:    {}://my-api.{}", scheme, cfg.domain);
-    println!("  ▸ Dashboard:        {}://dashboard.{}", scheme, cfg.domain);
+    println!("  ▸ Server address:    {}:{}", server_ip, cfg.control_port);
+    println!("  ▸ Access tunnel:     {}://<name>.{}", scheme, cfg.domain);
+    println!("  ▸ Dashboard:         {}://dashboard.{}", scheme, cfg.domain);
     println!();
 
     Ok(())

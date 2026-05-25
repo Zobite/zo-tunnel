@@ -6,8 +6,29 @@ use std::future::poll_fn;
 use std::sync::Arc;
 use tokio::io;
 use tokio::net::TcpStream;
+use tokio::sync::watch;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
+use tokio_util::sync::CancellationToken;
 use zo_tunnel_protocol::*;
+
+/// Real-time tunnel status, shared with the web UI.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(tag = "state")]
+pub enum TunnelStatus {
+    #[serde(rename = "stopped")]
+    #[default]
+    Stopped,
+    #[serde(rename = "connecting")]
+    Connecting,
+    #[serde(rename = "connected")]
+    Connected {
+        route: String,
+        #[serde(skip)]
+        since: std::time::Instant,
+    },
+    #[serde(rename = "error")]
+    Error { message: String },
+}
 
 pub struct Client {
     server_addr: String,
@@ -34,8 +55,34 @@ impl Client {
         }
     }
 
-    /// Run a single session: connect → (optional TLS) → auth → yamux → proxy streams.
-    pub async fn run(&self) -> Result<()> {
+    /// Run a single session with cancellation support and status reporting.
+    /// Used by TunnelManager for hot-reload control.
+    pub async fn run_cancellable(
+        &self,
+        cancel: CancellationToken,
+        status_tx: watch::Sender<TunnelStatus>,
+    ) -> Result<()> {
+        let _ = status_tx.send(TunnelStatus::Connecting);
+
+        tokio::select! {
+            result = self.run_with_status(&status_tx) => {
+                if let Err(ref e) = result {
+                    let _ = status_tx.send(TunnelStatus::Error {
+                        message: format!("{:#}", e),
+                    });
+                }
+                result
+            }
+            _ = cancel.cancelled() => {
+                tracing::info!("Tunnel '{}' cancelled", self.client_id);
+                let _ = status_tx.send(TunnelStatus::Stopped);
+                Ok(())
+            }
+        }
+    }
+
+    /// Run with status reporting (internal).
+    async fn run_with_status(&self, status_tx: &watch::Sender<TunnelStatus>) -> Result<()> {
         // ── Connect TCP ──
         let stream = TcpStream::connect(&self.server_addr)
             .await
@@ -43,13 +90,11 @@ impl Client {
         tracing::info!("Connected to server {}", self.server_addr);
 
         if self.tls_config.enabled {
-            // ── TLS mode ──
             let tls_stream = self.tls_connect(stream).await?;
             tracing::info!("🔒 TLS handshake complete");
-            self.run_session(tls_stream).await
+            self.run_session_with_status(tls_stream, status_tx).await
         } else {
-            // ── Plain TCP mode ──
-            self.run_session(stream).await
+            self.run_session_with_status(stream, status_tx).await
         }
     }
 
@@ -117,8 +162,8 @@ impl Client {
             ))
     }
 
-    /// Run the authenticated tunnel session over any stream type.
-    async fn run_session<S>(&self, mut stream: S) -> Result<()>
+    /// Run authenticated tunnel session with status reporting.
+    async fn run_session_with_status<S>(&self, mut stream: S, status_tx: &watch::Sender<TunnelStatus>) -> Result<()>
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
@@ -128,7 +173,6 @@ impl Client {
             token: self.token.clone(),
         });
         write_message(&mut stream, &auth_req).await?;
-        tracing::debug!("Sent AuthReq");
 
         let auth_res = read_message(&mut stream)
             .await
@@ -139,16 +183,18 @@ impl Client {
                     bail!("Authentication failed: {}", res.message);
                 }
 
-                // Extract domain from server message (format: "OK — <client_id>.<domain>")
                 let tunnel_url = res
                     .message
                     .strip_prefix("OK — ")
                     .unwrap_or(res.assigned_route.as_deref().unwrap_or("-"));
 
-                tracing::info!("✅ Authenticated!");
-                tracing::info!("┌──────────────────────────────────────────┐");
-                tracing::info!("│  🌐 Tunnel: http://{}  ", tunnel_url);
-                tracing::info!("└──────────────────────────────────────────┘");
+                let route = format!("http://{}", tunnel_url);
+                let _ = status_tx.send(TunnelStatus::Connected {
+                    route: route.clone(),
+                    since: std::time::Instant::now(),
+                });
+
+                tracing::info!("✅ Authenticated! Route: {}", route);
             }
             other => {
                 bail!("Expected AuthRes, got {:?}", other);
@@ -156,24 +202,19 @@ impl Client {
         }
 
         // ── Create yamux session ──
-        // yamux requires futures::AsyncRead/AsyncWrite, convert via compat
         let compat_stream = stream.compat();
         let yamux_config = yamux::Config::default();
         let mut conn = yamux::Connection::new(compat_stream, yamux_config, yamux::Mode::Client);
 
-        tracing::info!("🚇 Tunnel active — waiting for connections...");
+        tracing::info!("🚇 Tunnel '{}' active — waiting for connections...", self.client_id);
 
-        // Drive the yamux connection, accepting incoming streams from the server.
-        // Each stream = one public request being proxied.
         loop {
             let maybe_stream = poll_fn(|cx| conn.poll_next_inbound(cx)).await;
             match maybe_stream {
                 Some(Ok(yamux_stream)) => {
                     let local_addr = self.local_addr.clone();
-
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_tunnel_stream(yamux_stream, &local_addr).await
-                        {
+                        if let Err(e) = Self::handle_tunnel_stream(yamux_stream, &local_addr).await {
                             tracing::debug!("Stream error: {:#}", e);
                         }
                     });
@@ -189,7 +230,7 @@ impl Client {
             }
         }
 
-        tracing::info!("Tunnel session ended");
+        tracing::info!("Tunnel '{}' session ended", self.client_id);
         Ok(())
     }
 

@@ -29,10 +29,7 @@ cargo clippy --workspace -- -D warnings
 ### Local Dev
 
 ```bash
-# Setup server config (port mode, no domain needed)
-make setup-server
-
-# Start server
+# Start server (creates config on first run)
 make run-server
 
 # Connect a test client
@@ -94,7 +91,7 @@ zo-tunnel/
 │   ├── zo-tunnel-protocol/     # Shared protocol (messages, encoding)
 │   ├── zo-tunnel-server/       # Server binary
 │   │   └── src/
-│   │       ├── main.rs         # CLI: setup / start / status
+│   │       ├── main.rs         # CLI: start / stop / restart / status / upgrade / uninstall
 │   │       ├── config.rs       # Config with port & subdomain modes
 │   │       ├── server.rs       # Core: control, yamux, port allocation
 │   │       ├── proxy.rs        # HTTP proxy (subdomain mode)

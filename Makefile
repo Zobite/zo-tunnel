@@ -23,9 +23,6 @@ test-e2e: build-all
 
 # ── Run (dev) ──────────────────────────────────────────
 
-setup-server:
-	RUST_LOG=info cargo run -p zo-tunnel-server -- setup
-
 run-server:
 	RUST_LOG=info cargo run -p zo-tunnel-server -- start
 

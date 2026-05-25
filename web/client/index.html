@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zo Tunnel — Client Manager</title>
+    <meta name="description" content="Manage your Zo Tunnel connections through a beautiful local web interface">
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app" id="app">
+
+        <!-- ═══ Setup Screen (shown when not connected) ═══ -->
+        <div class="setup-screen" id="setup-screen" style="display:none">
+            <div class="setup-card">
+                <div class="setup-logo">
+                    <span class="logo-icon setup-logo-icon">⚡</span>
+                    <span class="logo-text">Zo Tunnel</span>
+                </div>
+                <p class="setup-subtitle">Connect to your tunnel server to get started</p>
+
+                <form id="setup-form" autocomplete="off">
+                    <div class="form-group">
+                        <label class="form-label" for="setup-server">Server Address</label>
+                        <input type="text" id="setup-server" class="form-input" placeholder="e.g. your-vps.com:6200" required autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="setup-token">Authentication Token</label>
+                        <input type="password" id="setup-token" class="form-input" placeholder="Your secret token" required autocomplete="off">
+                    </div>
+                    <div class="form-error" id="setup-error"></div>
+                    <button type="submit" class="btn btn-primary btn-lg btn-block" id="btn-setup-connect">
+                        Connect
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- ═══ Dashboard (shown when connected) ═══ -->
+        <div class="dashboard" id="dashboard" style="display:none">
+
+            <!-- Header -->
+            <header class="header" id="header">
+                <div class="header-left">
+                    <div class="logo">
+                        <span class="logo-icon">⚡</span>
+                        <span class="logo-text">Zo Tunnel</span>
+                    </div>
+                    <span class="badge online" id="status-badge">online</span>
+                </div>
+                <div class="header-right">
+                    <span class="server-info" id="server-info">—</span>
+                    <span class="version" id="version-info"></span>
+                    <button class="btn btn-secondary btn-sm" id="btn-disconnect" title="Disconnect from server">⏻ Disconnect</button>
+                </div>
+            </header>
+
+            <!-- Stats Bar -->
+            <div class="stats-bar" id="stats-bar">
+                <div class="stat-item">
+                    <span class="stat-value" id="stat-total">0</span>
+                    <span class="stat-label">Tunnels</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="stat-running">0</span>
+                    <span class="stat-label">Running</span>
+                </div>
+                <div class="stat-item stat-add">
+                    <button class="btn-add" id="btn-add-tunnel" title="Add New Tunnel">
+                        <span class="btn-add-icon">+</span>
+                        <span class="btn-add-text">Add Tunnel</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tunnel Cards -->
+            <main class="tunnels-container" id="tunnels-container">
+                <div class="empty-state" id="empty-state">
+                    <div class="empty-icon">🚇</div>
+                    <h2 class="empty-title">No tunnels yet</h2>
+                    <p class="empty-desc">Add your first tunnel to expose a local service to the internet</p>
+                    <button class="btn btn-primary" id="btn-add-first">
+                        <span>+</span> Add Tunnel
+                    </button>
+                </div>
+            </main>
+
+            <!-- Footer -->
+            <footer class="footer" id="footer">
+                Zo Tunnel Client Manager — Auto-refreshes every 2s
+            </footer>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal" id="modal">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modal-title">Add Tunnel</h2>
+                <button class="modal-close" id="modal-close" title="Close">&times;</button>
+            </div>
+            <form id="tunnel-form" autocomplete="off">
+                <input type="hidden" id="form-id" value="">
+                <div class="form-group">
+                    <label class="form-label" for="form-client-id">Tunnel Name</label>
+                    <input type="text" id="form-client-id" class="form-input" placeholder="e.g. my-api, web-app" pattern="[a-zA-Z0-9_-]+" required autocomplete="off">
+                    <span class="form-hint">Used as subdomain: <strong id="subdomain-preview">*.tunnel.domain</strong></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="form-local-addr">Local Address</label>
+                    <input type="text" id="form-local-addr" class="form-input" placeholder="e.g. localhost:3000" required autocomplete="off">
+                    <span class="form-hint">The local service to forward traffic to</span>
+                </div>
+                <div class="form-group form-group-inline">
+                    <label class="form-label" for="form-enabled">Auto-connect</label>
+                    <label class="toggle">
+                        <input type="checkbox" id="form-enabled" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="form-error" id="form-error"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="btn-submit">Add Tunnel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Delete Confirm Modal -->
+    <div class="modal-overlay" id="delete-overlay">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <h2 class="modal-title">Delete Tunnel</h2>
+                <button class="modal-close" id="delete-close" title="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete <strong id="delete-name"></strong>?</p>
+                <p class="text-muted">This will disconnect the tunnel and remove it from config.</p>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" id="btn-delete-cancel">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btn-delete-confirm">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Disconnect Confirm Modal -->
+    <div class="modal-overlay" id="disconnect-overlay">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <h2 class="modal-title">Disconnect</h2>
+                <button class="modal-close" id="disconnect-close" title="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Disconnect from the tunnel server?</p>
+                <p class="text-muted">All active tunnels will be stopped and credentials removed.</p>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" id="btn-disconnect-cancel">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btn-disconnect-confirm">Disconnect</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>
