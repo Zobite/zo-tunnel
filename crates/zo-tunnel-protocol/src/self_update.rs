@@ -162,7 +162,7 @@ pub fn upgrade(binary_name: &str, current_version: &str) -> anyhow::Result<()> {
     println!();
     if binary_name.contains("server") {
         println!("  ▸ Restart the service to use the new version:");
-        println!("    sudo systemctl restart zo-tunnel");
+        println!("    zo-tunnel-server restart");
     } else {
         println!("  ▸ Reconnect the client to use the new version.");
     }
@@ -419,7 +419,24 @@ fn tempdir() -> anyhow::Result<PathBuf> {
 }
 
 /// Copy file, falling back to sudo if permission denied.
+/// Handles "Text file busy" (ETXTBSY) by removing the old file first —
+/// the running process keeps its inode reference, so unlink is safe.
 fn copy_with_fallback(src: &Path, dst: &Path) -> anyhow::Result<bool> {
+    // First, try to remove the old file to avoid ETXTBSY when replacing
+    // a currently-executing binary. The OS keeps the inode alive until
+    // the running process exits, so this is safe.
+    if dst.exists() {
+        match std::fs::remove_file(dst) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                let _ = Command::new("sudo")
+                    .args(["rm", "-f", dst.to_str().unwrap()])
+                    .status();
+            }
+            Err(_) => {} // ignore other errors, copy will fail with a clear message
+        }
+    }
+
     match std::fs::copy(src, dst) {
         Ok(_) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {

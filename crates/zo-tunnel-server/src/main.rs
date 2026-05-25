@@ -258,6 +258,8 @@ fn create_config(args: &StartArgs) -> Result<config::ServerConfig> {
 
 /// Print server summary after start.
 fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
+    let server_ip = detect_server_ip();
+
     println!();
     println!("╔══════════════════════════════════════╗");
     println!("║       Zo Tunnel Server — Started     ║");
@@ -279,24 +281,26 @@ fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
     }
     println!();
 
-    if config_created {
-        // Show tokens only on first setup
-        let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
-        let dashboard_token = &cfg.dashboard_auth.token;
+    // Always show tokens and connect info
+    let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
+    let dashboard_token = &cfg.dashboard_auth.token;
+    let scheme = if cfg.tls.enabled { "https" } else { "http" };
 
-        println!("  🔑 Client token:     {}", client_token);
-        println!("  🔑 Dashboard token:  {}", dashboard_token);
-        println!();
-        println!("  ▸ Connect client:");
-        println!("    zo-tunnel-client --server <VPS_IP>:{} \\", cfg.control_port);
-        println!("      --id my-api --local localhost:3000 \\");
-        println!("      --token {}", client_token);
-        println!();
-        println!("  ▸ Access tunnel:    http://my-api.{}", cfg.domain);
-        println!("  ▸ Dashboard:        http://dashboard.{}", cfg.domain);
-        println!();
+    println!("  🔑 Client token:     {}", client_token);
+    println!("  🔑 Dashboard token:  {}", dashboard_token);
+    println!();
+    println!("  ▸ Connect client:");
+    println!("    zo-tunnel-client --server {}:{} \\", server_ip, cfg.control_port);
+    println!("      --id my-api --local localhost:3000 \\");
+    println!("      --token {}", client_token);
+    println!();
+    println!("  ▸ Access tunnel:    {}://my-api.{}", scheme, cfg.domain);
+    println!("  ▸ Dashboard:        {}://dashboard.{}", scheme, cfg.domain);
+    println!();
+
+    if config_created {
         println!("  ▸ DNS setup (required):");
-        println!("    Add a wildcard A record: *.{} → <VPS_IP>", cfg.domain);
+        println!("    Add a wildcard A record: *.{} → {}", cfg.domain, server_ip);
         println!();
     }
 
@@ -306,6 +310,22 @@ fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
     println!("    zo-tunnel-server logs -f");
     println!("    zo-tunnel-server status");
     println!();
+}
+
+/// Detect the server's public/primary IP address.
+fn detect_server_ip() -> String {
+    // Try `hostname -I` first (returns space-separated IPs, first is primary)
+    if let Ok(output) = std::process::Command::new("hostname").arg("-I").output() {
+        if output.status.success() {
+            let ips = String::from_utf8_lossy(&output.stdout);
+            if let Some(ip) = ips.split_whitespace().next() {
+                if !ip.is_empty() {
+                    return ip.to_string();
+                }
+            }
+        }
+    }
+    "<VPS_IP>".to_string()
 }
 
 /// Run the server in foreground mode (used by systemd or for debugging).
