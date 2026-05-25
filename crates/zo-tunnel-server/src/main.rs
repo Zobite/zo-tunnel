@@ -32,6 +32,9 @@ enum Command {
     /// Show current server configuration and status.
     Status,
 
+    /// Print a ready-to-copy client connect command.
+    ClientCmd(ClientCmdArgs),
+
     /// Upgrade to the latest version from GitHub releases.
     Upgrade,
 
@@ -78,6 +81,17 @@ struct SetupArgs {
 }
 
 #[derive(Parser, Debug)]
+struct ClientCmdArgs {
+    /// Client ID / tunnel name (default: my-app)
+    #[arg(long, default_value = "my-app")]
+    id: String,
+
+    /// Local service address (default: localhost:3000)
+    #[arg(long, default_value = "localhost:3000")]
+    local: String,
+}
+
+#[derive(Parser, Debug)]
 struct UninstallArgs {
     /// Skip confirmation prompt
     #[arg(long, short)]
@@ -96,6 +110,7 @@ async fn main() -> Result<()> {
         Command::Setup(args) => cmd_setup(args),
         Command::Start => cmd_start().await,
         Command::Status => cmd_status(),
+        Command::ClientCmd(args) => cmd_client_cmd(args),
         Command::Upgrade => cmd_upgrade(),
         Command::Uninstall(args) => cmd_uninstall(args),
     }
@@ -242,6 +257,61 @@ fn cmd_status() -> Result<()> {
         };
         println!("  Token #{}: {}", i + 1, masked);
     }
+    println!();
+
+    Ok(())
+}
+
+/// `zo-tunnel-server client-cmd` — print a ready-to-copy client connect command.
+fn cmd_client_cmd(args: ClientCmdArgs) -> Result<()> {
+    let config_path = match config::ServerConfig::resolve_config_path() {
+        Some(p) => p,
+        None => {
+            println!("❌ No config found.");
+            println!("   Run `zo-tunnel-server setup --domain <domain>` first.");
+            return Ok(());
+        }
+    };
+
+    let cfg = config::ServerConfig::load(&config_path)
+        .context("load config")?;
+
+    if cfg.auth.tokens.is_empty() {
+        println!("❌ No client tokens configured.");
+        println!("   Run `zo-tunnel-server setup --domain <domain>` to generate one.");
+        return Ok(());
+    }
+
+    let server_addr = if cfg.domain.is_empty() {
+        format!("<VPS_IP>:{}", cfg.control_port)
+    } else {
+        format!("{}:{}", cfg.domain, cfg.control_port)
+    };
+
+    let token = &cfg.auth.tokens[0];
+    let scheme = if cfg.tls.enabled { "https" } else { "http" };
+
+    println!();
+    println!("╔══════════════════════════════════════╗");
+    println!("║   Zo Tunnel — Client Connect Command ║");
+    println!("╚══════════════════════════════════════╝");
+    println!();
+    println!("  Copy and run on your local machine:");
+    println!();
+    println!("  zo-tunnel-client \\");
+    println!("    --server {} \\", server_addr);
+    println!("    --token {} \\", token);
+    println!("    --id {} \\", args.id);
+    println!("    --local {}", args.local);
+    println!();
+
+    if !cfg.domain.is_empty() {
+        println!("  ▸ Access tunnel:  {}://{}.{}", scheme, args.id, cfg.domain);
+        println!("  ▸ Dashboard:      {}://dashboard.{}", scheme, cfg.domain);
+    }
+    println!();
+    println!("  💡 Customize --id and --local to match your app.");
+    println!("     Example: --id my-api --local localhost:8080");
     println!();
 
     Ok(())
