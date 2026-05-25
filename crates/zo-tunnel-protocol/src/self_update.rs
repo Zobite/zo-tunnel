@@ -53,7 +53,7 @@ fn detect_target() -> anyhow::Result<String> {
 // ─── GitHub API helpers ──────────────────────────────────────────
 
 /// Fetch the latest release tag from GitHub (e.g. "v0.4.1").
-fn fetch_latest_version() -> anyhow::Result<String> {
+pub fn fetch_latest_version() -> anyhow::Result<String> {
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
     let output = Command::new("curl")
         .args(["-sSL", "--max-time", "15", &url])
@@ -79,7 +79,7 @@ fn fetch_latest_version() -> anyhow::Result<String> {
 
 /// Compare two semver strings, stripping leading 'v'.
 /// Returns true if `latest` is newer than `current`.
-fn is_newer(current: &str, latest: &str) -> bool {
+pub fn is_newer(current: &str, latest: &str) -> bool {
     let parse = |s: &str| -> (u32, u32, u32) {
         let s = s.strip_prefix('v').unwrap_or(s);
         let parts: Vec<u32> = s.split('.').filter_map(|p| p.parse().ok()).collect();

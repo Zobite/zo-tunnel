@@ -163,11 +163,11 @@ async function refresh() {
         document.getElementById('stat-failed-auth').textContent = metrics.failed_auth;
         document.getElementById('stat-rate-limited').textContent = metrics.rate_limited;
 
-        // Clients table — using safe DOM methods
+        // Clients table — using safe DOM methods with reconciliation
         const tbody = document.getElementById('clients-body');
-        tbody.replaceChildren(); // clear safely
 
         if (clients.length === 0) {
+            tbody.replaceChildren(); // clear safely
             const tr = document.createElement('tr');
             const td = document.createElement('td');
             td.colSpan = 7;
@@ -176,55 +176,44 @@ async function refresh() {
             tr.appendChild(td);
             tbody.appendChild(tr);
         } else {
-            clients.forEach(function (c) {
-                const tr = document.createElement('tr');
+            // Remove the empty row if it exists
+            const emptyRow = tbody.querySelector('tr td.empty');
+            if (emptyRow) {
+                tbody.replaceChildren();
+            }
 
-                // Client ID
-                const tdId = document.createElement('td');
-                tdId.className = 'client-id';
-                tdId.textContent = c.client_id;
-                tr.appendChild(tdId);
-
-                // Mode
-                const tdMode = document.createElement('td');
-                const modeSpan = document.createElement('span');
-                if (c.tcp_port) {
-                    modeSpan.style.color = 'var(--orange)';
-                    modeSpan.textContent = 'TCP:' + c.tcp_port;
-                } else {
-                    modeSpan.style.color = 'var(--green)';
-                    modeSpan.textContent = 'HTTP';
+            // Gather existing rows
+            const existingRows = {};
+            const rowElements = tbody.querySelectorAll('tr');
+            for (let i = 0; i < rowElements.length; i++) {
+                const id = rowElements[i].dataset.id;
+                if (id) {
+                    existingRows[id] = rowElements[i];
                 }
-                tdMode.appendChild(modeSpan);
-                tr.appendChild(tdMode);
+            }
 
-                // Connected
-                const tdConn = document.createElement('td');
-                tdConn.textContent = formatDuration(c.connected_at_secs) + ' ago';
-                tr.appendChild(tdConn);
+            let lastRow = null;
+            clients.forEach(function (c) {
+                let tr = existingRows[c.client_id];
+                if (tr) {
+                    updateClientRow(tr, c);
+                    delete existingRows[c.client_id];
+                } else {
+                    tr = buildClientRow(c);
+                }
 
-                // Requests
-                const tdReq = document.createElement('td');
-                tdReq.textContent = formatNumber(c.total_requests);
-                tr.appendChild(tdReq);
-
-                // Active
-                const tdActive = document.createElement('td');
-                tdActive.textContent = c.active_streams;
-                tr.appendChild(tdActive);
-
-                // Data In
-                const tdIn = document.createElement('td');
-                tdIn.textContent = formatBytes(c.bytes_in);
-                tr.appendChild(tdIn);
-
-                // Data Out
-                const tdOut = document.createElement('td');
-                tdOut.textContent = formatBytes(c.bytes_out);
-                tr.appendChild(tdOut);
-
-                tbody.appendChild(tr);
+                // Preserve correct order
+                const currentSibling = lastRow ? lastRow.nextSibling : tbody.firstChild;
+                if (currentSibling !== tr) {
+                    tbody.insertBefore(tr, currentSibling);
+                }
+                lastRow = tr;
             });
+
+            // Remove rows that are no longer active
+            for (const id in existingRows) {
+                existingRows[id].remove();
+            }
         }
 
     } catch (e) {
@@ -232,6 +221,96 @@ async function refresh() {
         const badge = document.getElementById('status-badge');
         badge.textContent = 'offline';
         badge.className = 'badge offline';
+    }
+}
+
+function buildClientRow(c) {
+    const tr = document.createElement('tr');
+    tr.dataset.id = c.client_id;
+
+    // Client ID
+    const tdId = document.createElement('td');
+    tdId.className = 'client-id';
+    tdId.textContent = c.client_id;
+    tr.appendChild(tdId);
+
+    // Mode
+    const tdMode = document.createElement('td');
+    tdMode.className = 'client-mode';
+    const modeSpan = document.createElement('span');
+    tdMode.appendChild(modeSpan);
+    tr.appendChild(tdMode);
+
+    // Connected
+    const tdConn = document.createElement('td');
+    tdConn.className = 'client-connected';
+    tr.appendChild(tdConn);
+
+    // Requests
+    const tdReq = document.createElement('td');
+    tdReq.className = 'client-requests';
+    tr.appendChild(tdReq);
+
+    // Active
+    const tdActive = document.createElement('td');
+    tdActive.className = 'client-active';
+    tr.appendChild(tdActive);
+
+    // Data In
+    const tdIn = document.createElement('td');
+    tdIn.className = 'client-in';
+    tr.appendChild(tdIn);
+
+    // Data Out
+    const tdOut = document.createElement('td');
+    tdOut.className = 'client-out';
+    tr.appendChild(tdOut);
+
+    updateClientRow(tr, c);
+    return tr;
+}
+
+function updateClientRow(tr, c) {
+    // Mode
+    const modeSpan = tr.querySelector('.client-mode span');
+    if (modeSpan) {
+        if (c.tcp_port) {
+            modeSpan.style.color = 'var(--orange)';
+            modeSpan.textContent = 'TCP:' + c.tcp_port;
+        } else {
+            modeSpan.style.color = 'var(--green)';
+            modeSpan.textContent = 'HTTP';
+        }
+    }
+
+    // Connected
+    const tdConn = tr.querySelector('.client-connected');
+    if (tdConn) {
+        tdConn.textContent = formatDuration(c.connected_at_secs) + ' ago';
+    }
+
+    // Requests
+    const tdReq = tr.querySelector('.client-requests');
+    if (tdReq) {
+        tdReq.textContent = formatNumber(c.total_requests);
+    }
+
+    // Active
+    const tdActive = tr.querySelector('.client-active');
+    if (tdActive) {
+        tdActive.textContent = c.active_streams;
+    }
+
+    // Data In
+    const tdIn = tr.querySelector('.client-in');
+    if (tdIn) {
+        tdIn.textContent = formatBytes(c.bytes_in);
+    }
+
+    // Data Out
+    const tdOut = tr.querySelector('.client-out');
+    if (tdOut) {
+        tdOut.textContent = formatBytes(c.bytes_out);
     }
 }
 

@@ -77,11 +77,27 @@
             var resp = await api('GET', '/api/status');
             if (resp.success && resp.data.connected) {
                 showDashboard();
+                checkForUpgrades();
             } else {
                 showSetup();
             }
         } catch (e) {
             showSetup();
+        }
+    }
+
+    async function checkForUpgrades() {
+        try {
+            var resp = await api('GET', '/api/upgrade/check');
+            if (resp.success && resp.data.upgrade_available) {
+                $('upgrade-message').textContent = '🎉 A new version of Zo Tunnel Client is available: ' + resp.data.latest + ' (current: ' + resp.data.current + ')';
+                $('btn-upgrade-client').textContent = 'Upgrade to ' + resp.data.latest;
+                $('upgrade-banner').style.display = 'flex';
+            } else {
+                $('upgrade-banner').style.display = 'none';
+            }
+        } catch (e) {
+            // Ignore upgrade check errors (e.g. rate limit or offline)
         }
     }
 
@@ -162,13 +178,13 @@
         var container = $('tunnels-container');
         var emptyState = $('empty-state');
 
-        // Remove existing tunnel cards
-        var cards = container.querySelectorAll('.tunnel-card');
-        for (var i = 0; i < cards.length; i++) {
-            cards[i].remove();
-        }
-
         if (data.length === 0) {
+            // Remove existing tunnel cards
+            var cards = container.querySelectorAll('.tunnel-card');
+            for (var i = 0; i < cards.length; i++) {
+                cards[i].remove();
+            }
+
             if (!emptyState) {
                 var es = createEl('div', 'empty-state');
                 es.id = 'empty-state';
@@ -194,9 +210,44 @@
 
         if (emptyState) emptyState.style.display = 'none';
 
+        // Reconcile tunnel cards to avoid visual flashing
+        var existingCards = {};
+        var cardElements = container.querySelectorAll('.tunnel-card');
+        for (var i = 0; i < cardElements.length; i++) {
+            var id = cardElements[i].dataset.id;
+            if (id) {
+                existingCards[id] = cardElements[i];
+            }
+        }
+
+        var lastElement = null;
         data.forEach(function (t) {
-            container.appendChild(buildTunnelCard(t));
+            var existingCard = existingCards[t.id];
+            var card;
+
+            if (existingCard) {
+                card = updateTunnelCard(existingCard, t);
+                delete existingCards[t.id];
+            } else {
+                card = buildTunnelCard(t);
+            }
+
+            // Ensure cards preserve the order from API and avoid moving elements unnecessarily
+            var currentSibling = lastElement ? lastElement.nextSibling : container.firstChild;
+            while (currentSibling && !currentSibling.classList.contains('tunnel-card')) {
+                currentSibling = currentSibling.nextSibling;
+            }
+
+            if (currentSibling !== card) {
+                container.insertBefore(card, currentSibling);
+            }
+            lastElement = card;
         });
+
+        // Remove cards that are no longer present
+        for (var id in existingCards) {
+            existingCards[id].remove();
+        }
     }
 
     function buildTunnelCard(t) {
@@ -285,6 +336,110 @@
         bottom.appendChild(btnDel);
 
         card.appendChild(bottom);
+        return card;
+    }
+
+    function updateTunnelCard(card, t) {
+        var state = t.status.state;
+        var localOk = t.status.local_reachable;
+
+        card.className = 'tunnel-card ' + state;
+
+        var nameDot = card.querySelector('.tunnel-name .status-dot');
+        if (nameDot) nameDot.className = 'status-dot ' + state;
+
+        var routeEl = card.querySelector('.tunnel-route');
+        if (t.status.route) {
+            if (routeEl) {
+                routeEl.textContent = t.status.route;
+            } else {
+                var newRoute = createEl('div', 'tunnel-route', t.status.route);
+                var localEl = card.querySelector('.tunnel-local');
+                localEl.parentNode.insertBefore(newRoute, localEl);
+            }
+        } else {
+            if (routeEl) routeEl.remove();
+        }
+
+        var localEl = card.querySelector('.tunnel-local');
+        if (localEl) {
+            localEl.replaceChildren();
+            localEl.appendChild(createEl('span', 'tunnel-local-arrow', '→'));
+            localEl.appendChild(document.createTextNode(' ' + t.local_addr));
+        }
+
+        var metaEl = card.querySelector('.tunnel-meta');
+        if (state === 'connected' && t.status.connected_since_secs != null) {
+            var text = '⏱ ' + formatDuration(t.status.connected_since_secs);
+            if (metaEl) {
+                var itemEl = metaEl.querySelector('.tunnel-meta-item');
+                if (itemEl) itemEl.textContent = text;
+            } else {
+                var newMeta = createEl('div', 'tunnel-meta');
+                newMeta.appendChild(createEl('span', 'tunnel-meta-item', text));
+                var localEl2 = card.querySelector('.tunnel-local');
+                localEl2.parentNode.insertBefore(newMeta, localEl2.nextSibling);
+            }
+        } else {
+            if (metaEl) metaEl.remove();
+        }
+
+        var errorEl = card.querySelector('.tunnel-error');
+        if (state === 'error' && t.status.error) {
+            if (errorEl) {
+                errorEl.textContent = t.status.error;
+            } else {
+                var newError = createEl('div', 'tunnel-error', t.status.error);
+                var insertAfter = card.querySelector('.tunnel-meta') || card.querySelector('.tunnel-local');
+                insertAfter.parentNode.insertBefore(newError, insertAfter.nextSibling);
+            }
+        } else {
+            if (errorEl) errorEl.remove();
+        }
+
+        var statusTags = card.querySelector('.status-tags');
+        if (statusTags) {
+            statusTags.replaceChildren();
+
+            var serverTag = createEl('span', 'tunnel-status-tag ' + state);
+            serverTag.appendChild(createEl('span', 'status-dot ' + state));
+            serverTag.appendChild(document.createTextNode('Server: ' + stateLabel(state)));
+            statusTags.appendChild(serverTag);
+
+            var localClass = localOk ? 'local-up' : 'local-down';
+            var localTag = createEl('span', 'tunnel-status-tag ' + localClass);
+            localTag.appendChild(createEl('span', 'status-dot ' + localClass));
+            localTag.appendChild(document.createTextNode('Local: ' + (localOk ? 'Up' : 'Down')));
+            statusTags.appendChild(localTag);
+        }
+
+        var bottom = card.querySelector('.tunnel-card-bottom');
+        if (bottom) {
+            bottom.replaceChildren();
+
+            var btnEdit = createEl('button', 'btn btn-secondary btn-sm', '✏️ Edit');
+            btnEdit.addEventListener('click', function () { openEditModal(t); });
+            bottom.appendChild(btnEdit);
+
+            if (state === 'connected' || state === 'connecting') {
+                var btnStop = createEl('button', 'btn btn-warning btn-sm', '⏹ Stop');
+                btnStop.addEventListener('click', function () { actionTunnel(t.id, 'stop'); });
+                bottom.appendChild(btnStop);
+
+                var btnRestart = createEl('button', 'btn btn-secondary btn-sm', '🔄 Restart');
+                btnRestart.addEventListener('click', function () { actionTunnel(t.id, 'restart'); });
+                bottom.appendChild(btnRestart);
+            } else {
+                var btnStart = createEl('button', 'btn btn-success btn-sm', '▶ Start');
+                btnStart.addEventListener('click', function () { actionTunnel(t.id, 'start'); });
+                bottom.appendChild(btnStart);
+            }
+
+            var btnDel = createEl('button', 'btn btn-danger btn-sm', '🗑 Delete');
+            btnDel.addEventListener('click', function () { openDeleteModal(t); });
+            bottom.appendChild(btnDel);
+        }
+
         return card;
     }
 
@@ -425,6 +580,8 @@
     function openDeleteModal(tunnel) {
         deleteTunnelId = tunnel.id;
         $('delete-name').textContent = tunnel.client_id;
+        var deleteError = $('delete-error');
+        if (deleteError) deleteError.textContent = '';
         $('delete-overlay').classList.add('active');
     }
 
@@ -442,11 +599,21 @@
     $('btn-delete-confirm').addEventListener('click', async function () {
         if (!deleteTunnelId) return;
         $('btn-delete-confirm').disabled = true;
+        var deleteError = $('delete-error');
+        if (deleteError) deleteError.textContent = '';
         try {
             var result = await api('DELETE', '/api/tunnels/' + encodeURIComponent(deleteTunnelId));
-            if (result.success) { closeDeleteModal(); refreshDashboard(); }
-        } catch (e) { /* */ }
-        finally { $('btn-delete-confirm').disabled = false; }
+            if (result.success) { 
+                closeDeleteModal(); 
+                refreshDashboard(); 
+            } else {
+                if (deleteError) deleteError.textContent = result.error || 'Failed to delete tunnel';
+            }
+        } catch (e) { 
+            if (deleteError) deleteError.textContent = 'Connection error. Please try again.';
+        } finally { 
+            $('btn-delete-confirm').disabled = false; 
+        }
     });
 
     // ─── Misc ───────────────────────────────────────────────────
@@ -454,6 +621,56 @@
     $('form-client-id').addEventListener('input', function () {
         $('subdomain-preview').textContent = (this.value.trim() || 'name') + '.your-domain';
     });
+
+    $('btn-upgrade-client').addEventListener('click', async function () {
+        if (!confirm('Are you sure you want to upgrade the client to the latest version? This will temporarily disconnect your tunnels.')) {
+            return;
+        }
+
+        $('upgrade-overlay').classList.add('active');
+        $('upgrade-progress-text').textContent = 'Downloading and installing the latest version...';
+
+        try {
+            var resp = await api('POST', '/api/upgrade');
+            if (resp.success) {
+                $('upgrade-progress-text').textContent = 'Upgrade successful! Restarting client...';
+                
+                // Wait for the client to go offline, then come back online
+                setTimeout(pollRestartAndReload, 1500);
+            } else {
+                $('upgrade-overlay').classList.remove('active');
+                alert('Upgrade failed: ' + (resp.error || 'Unknown error'));
+            }
+        } catch (err) {
+            $('upgrade-overlay').classList.remove('active');
+            alert('Upgrade error: ' + err.message);
+        }
+    });
+
+    async function pollRestartAndReload() {
+        var attempts = 0;
+        var interval = setInterval(async function () {
+            attempts++;
+            if (attempts > 30) {
+                clearInterval(interval);
+                $('upgrade-progress-text').textContent = 'Client restart is taking longer than expected. Please reload the page manually.';
+                return;
+            }
+
+            try {
+                var resp = await api('GET', '/api/status');
+                if (resp.success) {
+                    clearInterval(interval);
+                    $('upgrade-progress-text').textContent = 'Reconnected! Reloading page...';
+                    setTimeout(function () {
+                        window.location.reload();
+                    }, 500);
+                }
+            } catch (e) {
+                // Ignore connection errors while server is restarting
+            }
+        }, 1000);
+    }
 
     $('btn-add-tunnel').addEventListener('click', openAddModal);
     var addFirstBtn = $('btn-add-first');

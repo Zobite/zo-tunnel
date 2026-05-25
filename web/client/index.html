@@ -56,6 +56,12 @@
                 </div>
             </header>
 
+            <!-- Upgrade Banner -->
+            <div class="upgrade-banner" id="upgrade-banner" style="display: none;">
+                <span id="upgrade-message">🎉 A new version of Zo Tunnel Client is available!</span>
+                <button class="btn btn-primary btn-sm" id="btn-upgrade-client">Upgrade Now</button>
+            </div>
+
             <!-- Stats Bar -->
             <div class="stats-bar" id="stats-bar">
                 <div class="stat-item">
@@ -138,6 +144,7 @@
             <div class="modal-body">
                 <p>Are you sure you want to delete <strong id="delete-name"></strong>?</p>
                 <p class="text-muted">This will disconnect the tunnel and remove it from config.</p>
+                <div class="form-error" id="delete-error" style="margin-top: var(--space-sm);"></div>
             </div>
             <div class="form-actions">
                 <button type="button" class="btn btn-secondary" id="btn-delete-cancel">Cancel</button>
@@ -161,6 +168,15 @@
                 <button type="button" class="btn btn-secondary" id="btn-disconnect-cancel">Cancel</button>
                 <button type="button" class="btn btn-danger" id="btn-disconnect-confirm">Disconnect</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Upgrade Progress Modal -->
+    <div class="modal-overlay" id="upgrade-overlay">
+        <div class="modal modal-sm" style="text-align: center; padding: var(--space-xl);">
+            <div class="spinner" style="font-size: 3rem; margin-bottom: var(--space-md);">🔄</div>
+            <h3 style="margin-bottom: var(--space-sm);">Upgrading Client</h3>
+            <p class="text-muted" id="upgrade-progress-text">Downloading and installing the latest version...</p>
         </div>
     </div>
 

@@ -21,13 +21,17 @@ use tokio::sync::RwLock;
 pub struct AppState {
     /// TunnelManager — None until user connects (logs in via web UI)
     inner: Arc<RwLock<Option<Arc<TunnelManager>>>>,
+    bind: String,
+    port: u16,
 }
 
 impl AppState {
     /// Create a new AppState. If credentials exist, initializes TunnelManager.
-    pub async fn new() -> Self {
+    pub async fn new(bind: String, port: u16) -> Self {
         let state = Self {
             inner: Arc::new(RwLock::new(None)),
+            bind,
+            port,
         };
 
         // Try to load existing credentials
@@ -131,6 +135,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/tunnels/{id}/restart", post(api_restart_tunnel))
         // Status
         .route("/api/status", get(api_status))
+        // Upgrade API
+        .route("/api/upgrade/check", get(api_upgrade_check))
+        .route("/api/upgrade", post(api_upgrade))
         .with_state(state)
 }
 
@@ -298,6 +305,73 @@ async fn api_status(State(state): State<AppState>) -> impl IntoResponse {
             total_tunnels: 0,
             running_tunnels: 0,
         })
+    }
+}
+
+#[derive(serde::Serialize)]
+struct UpgradeCheckInfo {
+    current: String,
+    latest: String,
+    upgrade_available: bool,
+}
+
+async fn api_upgrade_check() -> impl IntoResponse {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    match tokio::task::spawn_blocking(zo_tunnel_protocol::self_update::fetch_latest_version).await {
+        Ok(Ok(latest)) => {
+            let upgrade_available = zo_tunnel_protocol::self_update::is_newer(&current, &latest);
+            ok_response(UpgradeCheckInfo {
+                current: format!("v{}", current),
+                latest,
+                upgrade_available,
+            }).into_response()
+        }
+        _ => err_response("Failed to fetch latest version from GitHub".into()).into_response(),
+    }
+}
+
+async fn api_upgrade(State(state): State<AppState>) -> impl IntoResponse {
+    let current = env!("CARGO_PKG_VERSION");
+    
+    // Perform self update in blocking task
+    let update_result = tokio::task::spawn_blocking(move || {
+        zo_tunnel_protocol::self_update::upgrade("zo-tunnel-client", current)
+    }).await;
+
+    match update_result {
+        Ok(Ok(())) => {
+            // Self-upgrade successful! We now schedule a background self-restart.
+            // Spawning a shell command that sleeps for 1 second, then starts client again.
+            let bind = state.bind.clone();
+            let port = state.port;
+
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                tracing::info!("🔄 Initiating client self-restart...");
+
+                // Execute background restart script (completely detached using nohup and &)
+                let restart_cmd = format!(
+                    "nohup sh -c 'sleep 1 && /usr/local/bin/zo-tunnel-client stop && sleep 1 && /usr/local/bin/zo-tunnel-client start --bind {} --port {}' >/dev/null 2>&1 &",
+                    bind, port
+                );
+
+                let status = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&restart_cmd)
+                    .status();
+
+                if let Err(e) = status {
+                    tracing::error!("Failed to trigger background self-restart command: {}", e);
+                }
+
+                // Exit current process
+                std::process::exit(0);
+            });
+
+            ok_response("Upgrade successful. Restarting client...").into_response()
+        }
+        Ok(Err(e)) => err_response(format!("Upgrade failed: {:#}", e)).into_response(),
+        Err(e) => err_response(format!("Task panic: {}", e)).into_response(),
     }
 }
 

@@ -185,11 +185,13 @@ done
 echo ""
 
 if [ "$COMPONENT" = "client" ] || [ "$COMPONENT" = "all" ]; then
-    echo "  Client usage:"
-    echo -e "    ${CYAN}zo-tunnel-client --server YOUR_VPS:6200${NC} \\"
-    echo -e "    ${CYAN}  --local localhost:3000 --id my-app${NC} \\"
-    echo -e "    ${CYAN}  --token YOUR_TOKEN${NC}"
-    echo ""
+    if command -v zo-tunnel-client &>/dev/null; then
+        zo-tunnel-client start || true
+    elif [ -f "${INSTALL_DIR}/zo-tunnel-client" ]; then
+        "${INSTALL_DIR}/zo-tunnel-client" start || true
+    else
+        warn "Could not find zo-tunnel-client binary to start"
+    fi
 fi
 
 if [ "$COMPONENT" = "server" ] || [ "$COMPONENT" = "all" ]; then

@@ -349,7 +349,7 @@ async fn cmd_foreground(bind: String, port: u16) -> Result<()> {
 /// Inner foreground logic, separated so the caller can clean up PID on error.
 async fn run_foreground(bind: String, port: u16) -> Result<()> {
     // ── Create app state ──
-    let app_state = web_server::AppState::new().await;
+    let app_state = web_server::AppState::new(bind.clone(), port).await;
 
     // If credentials exist, auto-start tunnels
     if app_state.is_connected().await {
