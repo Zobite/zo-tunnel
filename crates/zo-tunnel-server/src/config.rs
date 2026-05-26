@@ -31,7 +31,7 @@ pub struct ServerConfig {
     pub rate_limit: RateLimitConfig,
 
     #[serde(default)]
-    pub traefik: TraefikConfig,
+    pub caddy: crate::caddy::CaddyConfig,
 
     #[serde(default = "default_log_level")]
     pub log_level: String,
@@ -86,68 +86,7 @@ impl Default for RateLimitConfig {
     }
 }
 
-/// Traefik integration — auto-create/delete per-client route config files.
-/// Auto-detected: if a Traefik dynamic config directory exists, integration
-/// is enabled automatically. No manual configuration needed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraefikConfig {
-    /// Enable Traefik integration (auto-detected if not set)
-    #[serde(default)]
-    pub enabled: bool,
-    /// Directory for Traefik dynamic config files
-    #[serde(default = "default_traefik_dir")]
-    pub config_dir: String,
-    /// Traefik entrypoint name
-    #[serde(default = "default_traefik_entrypoint")]
-    pub entrypoint: String,
-    /// Traefik certificate resolver name
-    #[serde(default = "default_traefik_cert_resolver")]
-    pub cert_resolver: String,
-}
 
-impl TraefikConfig {
-    /// Common Traefik dynamic config directories to auto-detect.
-    const TRAEFIK_DIRS: &[&str] = &[
-        "/etc/traefik/conf.d",
-        "/etc/traefik/dynamic",
-    ];
-
-    /// Auto-detect Traefik: if a known directory exists, enable integration.
-    pub fn auto_detect() -> Self {
-        for dir in Self::TRAEFIK_DIRS {
-            if std::path::Path::new(dir).is_dir() {
-                return Self {
-                    enabled: true,
-                    config_dir: dir.to_string(),
-                    entrypoint: default_traefik_entrypoint(),
-                    cert_resolver: default_traefik_cert_resolver(),
-                };
-            }
-        }
-        Self::default()
-    }
-}
-
-impl Default for TraefikConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            config_dir: default_traefik_dir(),
-            entrypoint: default_traefik_entrypoint(),
-            cert_resolver: default_traefik_cert_resolver(),
-        }
-    }
-}
-
-fn default_traefik_dir() -> String {
-    "/etc/traefik/conf.d".into()
-}
-fn default_traefik_entrypoint() -> String {
-    "websecure".into()
-}
-fn default_traefik_cert_resolver() -> String {
-    "letsencrypt".into()
-}
 
 fn default_control_port() -> u16 {
     zo_tunnel_protocol::DEFAULT_CONTROL_PORT
@@ -177,7 +116,7 @@ impl Default for ServerConfig {
             auth: AuthConfig::default(),
             dashboard_auth: DashboardAuthConfig::default(),
             rate_limit: RateLimitConfig::default(),
-            traefik: TraefikConfig::default(),
+            caddy: crate::caddy::CaddyConfig::default(),
             log_level: default_log_level(),
         }
     }

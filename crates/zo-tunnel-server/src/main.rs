@@ -8,7 +8,7 @@ mod metrics;
 mod proxy;
 mod registry;
 mod server;
-mod traefik;
+mod caddy;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -211,10 +211,10 @@ fn create_config(args: &StartArgs) -> Result<config::ServerConfig> {
     cfg.auth.tokens = vec![client_token];
     cfg.dashboard_auth.token = dashboard_token;
 
-    // Auto-detect Traefik
-    cfg.traefik = config::TraefikConfig::auto_detect();
-    if cfg.traefik.enabled {
-        eprintln!("  🔀 Traefik detected: {}", cfg.traefik.config_dir);
+    // Auto-detect Caddy
+    cfg.caddy = caddy::CaddyConfig::auto_detect();
+    if cfg.caddy.enabled {
+        eprintln!("  🔀 Caddy detected");
     }
 
     cfg.save().context("save config")?;
@@ -240,15 +240,15 @@ fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
     println!("  Control port:    {}", cfg.control_port);
     println!("  Public port:     {}", cfg.public_port);
     println!("  Dashboard:       dashboard.{}", cfg.domain);
-    if cfg.traefik.enabled {
-        println!("  TLS:             via Traefik ({})", cfg.traefik.config_dir);
+    if cfg.caddy.enabled {
+        println!("  TLS:             via Caddy (on-demand)");
     }
     println!();
 
     // Always show tokens and connect info
     let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
     let dashboard_token = &cfg.dashboard_auth.token;
-    let scheme = if cfg.traefik.enabled { "https" } else { "http" };
+    let scheme = if cfg.caddy.enabled { "https" } else { "http" };
 
     println!("  🔑 Client token:     {}", client_token);
     println!("  🔑 Dashboard token:  {}", dashboard_token);
@@ -313,7 +313,7 @@ async fn run_foreground() -> Result<()> {
 
     tracing::info!(
         "Domain:*.{} | Control:{} | Public:{} | TLS:{}",
-        cfg.domain, cfg.control_port, cfg.public_port, cfg.traefik.enabled,
+        cfg.domain, cfg.control_port, cfg.public_port, cfg.caddy.enabled,
     );
     tracing::info!("Config: {}", config_path.display());
 
@@ -407,8 +407,8 @@ fn cmd_status() -> Result<()> {
     println!("  Control port:    {}", cfg.control_port);
     println!("  Public port:     {}", cfg.public_port);
     println!("  Dashboard:       dashboard.{}", cfg.domain);
-    if cfg.traefik.enabled {
-        println!("  TLS:             via Traefik ({})", cfg.traefik.config_dir);
+    if cfg.caddy.enabled {
+        println!("  TLS:             via Caddy (on-demand)");
     }
     println!("  Client tokens:   {} configured", cfg.auth.tokens.len());
     println!("  Dashboard auth:  {}", if cfg.dashboard_auth_enabled() { "enabled" } else { "disabled" });
@@ -417,7 +417,7 @@ fn cmd_status() -> Result<()> {
     // Show tokens and access info
     let server_ip = detect_server_ip();
     let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
-    let scheme = if cfg.traefik.enabled { "https" } else { "http" };
+    let scheme = if cfg.caddy.enabled { "https" } else { "http" };
 
     println!("  🔑 Client token:     {}", client_token);
     println!("  🔑 Dashboard token:  {}", &cfg.dashboard_auth.token);

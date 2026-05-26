@@ -4,7 +4,7 @@ use crate::config::ServerConfig;
 use crate::dashboard::{self, DashboardState};
 use crate::metrics::{Metrics, RateLimiter};
 use crate::proxy;
-use crate::traefik;
+
 use crate::registry::Registry;
 use anyhow::{Context, Result};
 use http_body_util::BodyExt;
@@ -139,7 +139,8 @@ impl Server {
             metrics: metrics.clone(),
             dashboard_token: self.config.dashboard_auth.token.clone(),
             auth_enabled: self.config.dashboard_auth_enabled(),
-            tls_enabled: self.config.traefik.enabled,
+            tls_enabled: self.config.caddy.enabled,
+            domain: domain.clone(),
             sessions: Arc::new(dashboard::SessionStore::new(
                 self.config.dashboard_auth.session_ttl_secs,
             )),
@@ -196,8 +197,7 @@ impl Server {
         tracing::info!("🧹 Cleaning up...");
         public_task.abort();
 
-        // Clean up Traefik route files
-        traefik::cleanup_all(&self.config.traefik);
+
 
         let connected = registry.count();
         if connected > 0 {
@@ -326,8 +326,7 @@ impl Server {
             registry.count()
         );
 
-        // ── Create Traefik route for this client ──
-        traefik::create_route(&config.traefik, &client_id, &config.domain, config.public_port);
+
 
         // Wait for the yamux driver to finish (= client disconnect)
         let _ = driver_task.await;
@@ -335,8 +334,7 @@ impl Server {
         // Client disconnected — unregister
         registry.unregister(&client_id);
 
-        // ── Remove Traefik route for this client ──
-        traefik::remove_route(&config.traefik, &client_id);
+
 
         tracing::info!(
             "🔴 Client '{}' disconnected (remaining: {})",
@@ -413,6 +411,13 @@ impl Server {
                             .and_then(|v| v.to_str().ok())
                             .unwrap_or("");
                         let host_no_port = host.split(':').next().unwrap_or(host);
+
+                        // Caddy On-Demand TLS check — route to dashboard
+                        // regardless of Host header (Caddy calls via localhost)
+                        let path = req.uri().path();
+                        if path == "/api/tls-check" {
+                            return Self::handle_dashboard(req, dash).await;
+                        }
 
                         if host_no_port == dash_host {
                             // Route to dashboard

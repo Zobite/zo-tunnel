@@ -73,6 +73,7 @@ pub struct DashboardState {
     pub dashboard_token: String,
     pub auth_enabled: bool,
     pub tls_enabled: bool,
+    pub domain: String,
     pub sessions: Arc<SessionStore>,
 }
 
@@ -84,6 +85,7 @@ pub fn create_router(state: DashboardState) -> Router {
         .route("/app.js", get(dashboard_js))
         .route("/api/login", post(api_login))
         .route("/api/auth/check", get(api_auth_check))
+        .route("/api/tls-check", get(api_tls_check))
         // Protected routes (auth required)
         .route("/api/status", get(api_status))
         .route("/api/clients", get(api_clients))
@@ -162,7 +164,7 @@ struct AuthCheckResponse {
     tls_enabled: bool,
 }
 
-/// Helper to detect if TLS is enabled (natively or via reverse proxy like Traefik/Nginx).
+/// Helper to detect if TLS is enabled (natively or via reverse proxy like Caddy/Nginx).
 fn is_tls_enabled(state: &DashboardState, headers: &HeaderMap) -> bool {
     if state.tls_enabled {
         return true;
@@ -334,6 +336,61 @@ async fn api_metrics(
         ));
     }
     Ok(Json(state.metrics.snapshot()))
+}
+
+// ─── Caddy On-Demand TLS Check ──────────────────────────────────
+
+#[derive(Deserialize)]
+struct TlsCheckQuery {
+    domain: String,
+}
+
+/// Caddy On-Demand TLS check endpoint.
+/// Called by Caddy before issuing a certificate for a subdomain.
+///
+/// Returns 200 OK if the subdomain belongs to a connected client
+/// or is a reserved subdomain (e.g. "dashboard").
+/// Returns 403 Forbidden otherwise (tells Caddy to reject the request).
+///
+/// No authentication required — this endpoint is called internally by Caddy.
+async fn api_tls_check(
+    State(state): State<DashboardState>,
+    axum::extract::Query(query): axum::extract::Query<TlsCheckQuery>,
+) -> impl IntoResponse {
+    let requested_domain = &query.domain;
+
+    // Extract the subdomain: "my-api.tunnel.example.com" → "my-api"
+    let subdomain = if let Some(sub) = requested_domain.strip_suffix(&format!(".{}", state.domain))
+    {
+        sub
+    } else {
+        // Domain doesn't match our base domain — reject
+        tracing::debug!(
+            "TLS check: rejected '{}' (not under *.{})",
+            requested_domain,
+            state.domain
+        );
+        return StatusCode::FORBIDDEN;
+    };
+
+    // Allow reserved subdomains (dashboard, etc.)
+    if crate::config::RESERVED_SUBDOMAINS.contains(&subdomain) {
+        tracing::debug!("TLS check: approved '{}' (reserved subdomain)", requested_domain);
+        return StatusCode::OK;
+    }
+
+    // Check if the subdomain corresponds to a connected client
+    if state.registry.get(subdomain).is_some() {
+        tracing::debug!("TLS check: approved '{}' (client connected)", requested_domain);
+        return StatusCode::OK;
+    }
+
+    tracing::debug!(
+        "TLS check: rejected '{}' (no connected client '{}')",
+        requested_domain,
+        subdomain
+    );
+    StatusCode::FORBIDDEN
 }
 
 // ─── Embedded Dashboard UI ──────────────────────────────────────
