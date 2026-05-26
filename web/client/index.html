@@ -11,6 +11,28 @@
 <body>
     <div class="app" id="app">
 
+        <!-- ═══ Connection Error Screen (shown when local server unreachable) ═══ -->
+        <div class="setup-screen" id="connection-error-screen" style="display:none">
+            <div class="setup-card connection-error-card">
+                <div class="setup-logo">
+                    <span class="logo-icon setup-logo-icon connection-error-icon">⚡</span>
+                    <span class="logo-text">Zo Tunnel</span>
+                </div>
+                <div class="connection-error-content">
+                    <div class="connection-error-badge">
+                        <span class="status-dot error"></span>
+                        <span>Connection Failed</span>
+                    </div>
+                    <p class="connection-error-desc">Unable to connect to the Zo Tunnel client service. Please make sure the client is running and try again.</p>
+                    <div class="connection-error-details" id="connection-error-details"></div>
+                    <button type="button" class="btn btn-primary btn-lg btn-block" id="btn-retry-connect">
+                        🔄 Retry Connection
+                    </button>
+                    <p class="connection-error-hint">Make sure <code>zo-tunnel client</code> is running on this machine.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- ═══ Setup Screen (shown when not connected) ═══ -->
         <div class="setup-screen" id="setup-screen" style="display:none">
             <div class="setup-card">

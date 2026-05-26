@@ -45,13 +45,30 @@
 
     // ─── View Switching ─────────────────────────────────────────
 
+    function showConnectionError(errorMsg) {
+        $('connection-error-screen').style.display = '';
+        $('setup-screen').style.display = 'none';
+        $('dashboard').style.display = 'none';
+        stopRefresh();
+        var details = $('connection-error-details');
+        if (errorMsg) {
+            details.textContent = errorMsg;
+            details.style.display = '';
+        } else {
+            details.textContent = '';
+            details.style.display = 'none';
+        }
+    }
+
     function showSetup() {
+        $('connection-error-screen').style.display = 'none';
         $('setup-screen').style.display = '';
         $('dashboard').style.display = 'none';
         stopRefresh();
     }
 
     function showDashboard() {
+        $('connection-error-screen').style.display = 'none';
         $('setup-screen').style.display = 'none';
         $('dashboard').style.display = '';
         startRefresh();
@@ -82,7 +99,7 @@
                 showSetup();
             }
         } catch (e) {
-            showSetup();
+            showConnectionError();
         }
     }
 
@@ -681,6 +698,28 @@
             closeModal();
             closeDeleteModal();
             $('disconnect-overlay').classList.remove('active');
+        }
+    });
+
+    // ─── Retry Connection ───────────────────────────────────────
+
+    $('btn-retry-connect').addEventListener('click', async function () {
+        var btn = $('btn-retry-connect');
+        btn.disabled = true;
+        btn.textContent = '⏳ Connecting...';
+        try {
+            var resp = await api('GET', '/api/status');
+            if (resp.success && resp.data.connected) {
+                showDashboard();
+                checkForUpgrades();
+            } else {
+                showSetup();
+            }
+        } catch (e) {
+            showConnectionError();
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔄 Retry Connection';
         }
     });
 

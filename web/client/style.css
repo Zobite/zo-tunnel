@@ -1110,3 +1110,70 @@ body::before {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
+/* ─── Connection Error Screen ────────────────────────────────── */
+
+.connection-error-card {
+    text-align: center;
+}
+
+.connection-error-icon {
+    filter: drop-shadow(0 0 8px var(--accent-red-glow)) !important;
+    animation: none !important;
+}
+
+.connection-error-content {
+    margin-top: var(--space-md);
+}
+
+.connection-error-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 6px 16px;
+    background: var(--accent-red-glow);
+    color: var(--accent-red);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: var(--space-lg);
+}
+
+.connection-error-desc {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin-bottom: var(--space-lg);
+}
+
+.connection-error-details {
+    padding: var(--space-sm) var(--space-md);
+    background: var(--accent-red-glow);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    color: var(--accent-red);
+    margin-bottom: var(--space-lg);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    word-break: break-word;
+    display: none;
+}
+
+.connection-error-hint {
+    margin-top: var(--space-md);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.connection-error-hint code {
+    padding: 2px 8px;
+    background: var(--bg-card-hover);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.78rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--text-accent);
+}
