@@ -11,7 +11,8 @@ set -euo pipefail
 # ═══════════════════════════════════════════════════════════════════
 
 REPO="Zobite/zo-tunnel"
-INSTALL_DIR="/usr/local/bin"
+SERVER_INSTALL_DIR="/usr/local/bin"
+CLIENT_INSTALL_DIR="$HOME/.zo-tunnel/bin"
 COMPONENT="${1:-client}"   # client, server, or all
 
 # ─── Colors ───
@@ -26,6 +27,16 @@ info()  { echo -e "${BLUE}▸${NC} $*"; }
 ok()    { echo -e "${GREEN}✅${NC} $*"; }
 warn()  { echo -e "${YELLOW}⚠️${NC}  $*"; }
 fail()  { echo -e "${RED}❌${NC} $*"; exit 1; }
+
+# ─── Get install dir for a component ───
+get_install_dir() {
+    local binary="$1"
+    if [ "$binary" = "client" ]; then
+        echo "$CLIENT_INSTALL_DIR"
+    else
+        echo "$SERVER_INSTALL_DIR"
+    fi
+}
 
 echo ""
 echo -e "${BLUE}╔══════════════════════════════════════╗${NC}"
@@ -92,17 +103,31 @@ if [ -n "$LATEST" ]; then
         local_url="https://github.com/${REPO}/releases/download/${LATEST}/zo-tunnel-${binary}-${LATEST}-${TARGET}.tar.gz"
         info "Downloading zo-tunnel-${binary}..."
 
+        DEST_DIR=$(get_install_dir "$binary")
+        mkdir -p "$DEST_DIR"
+
         if curl -fsSL "$local_url" -o "$TMP_DIR/${binary}.tar.gz" 2>/dev/null; then
             if tar -xzf "$TMP_DIR/${binary}.tar.gz" -C "$TMP_DIR" 2>/dev/null && [ -f "$TMP_DIR/zo-tunnel-${binary}" ]; then
-                # Install to /usr/local/bin
-                if [ -w "$INSTALL_DIR" ]; then
-                    cp "$TMP_DIR/zo-tunnel-${binary}" "$INSTALL_DIR/"
+                # Install to appropriate directory
+                if [ -w "$DEST_DIR" ]; then
+                    cp "$TMP_DIR/zo-tunnel-${binary}" "$DEST_DIR/"
                 else
-                    info "Need sudo to install to $INSTALL_DIR"
-                    sudo cp "$TMP_DIR/zo-tunnel-${binary}" "$INSTALL_DIR/"
+                    info "Need sudo to install to $DEST_DIR"
+                    sudo cp "$TMP_DIR/zo-tunnel-${binary}" "$DEST_DIR/"
                 fi
-                chmod +x "$INSTALL_DIR/zo-tunnel-${binary}"
-                ok "Installed zo-tunnel-${binary} → ${INSTALL_DIR}/zo-tunnel-${binary}"
+                chmod +x "$DEST_DIR/zo-tunnel-${binary}"
+                ok "Installed zo-tunnel-${binary} → ${DEST_DIR}/zo-tunnel-${binary}"
+
+                # Migrate: remove old client from /usr/local/bin if it exists
+                if [ "$binary" = "client" ] && [ -f "${SERVER_INSTALL_DIR}/zo-tunnel-client" ]; then
+                    info "Removing old client from ${SERVER_INSTALL_DIR}..."
+                    if [ -w "${SERVER_INSTALL_DIR}" ]; then
+                        rm -f "${SERVER_INSTALL_DIR}/zo-tunnel-client"
+                    else
+                        sudo rm -f "${SERVER_INSTALL_DIR}/zo-tunnel-client"
+                    fi
+                    ok "Migrated from ${SERVER_INSTALL_DIR} → ${DEST_DIR}"
+                fi
             else
                 warn "Failed to extract zo-tunnel-${binary}"
                 DOWNLOAD_OK=false
@@ -155,15 +180,44 @@ if [ "$DOWNLOAD_OK" = false ]; then
             fail "Build failed — binary not found at $BUILT_BINARY"
         fi
 
-        if [ -w "$INSTALL_DIR" ]; then
-            cp "$BUILT_BINARY" "$INSTALL_DIR/zo-tunnel-${binary}"
+        DEST_DIR=$(get_install_dir "$binary")
+        mkdir -p "$DEST_DIR"
+
+        if [ -w "$DEST_DIR" ]; then
+            cp "$BUILT_BINARY" "$DEST_DIR/zo-tunnel-${binary}"
         else
-            info "Need sudo to install to $INSTALL_DIR"
-            sudo cp "$BUILT_BINARY" "$INSTALL_DIR/zo-tunnel-${binary}"
+            info "Need sudo to install to $DEST_DIR"
+            sudo cp "$BUILT_BINARY" "$DEST_DIR/zo-tunnel-${binary}"
         fi
-        chmod +x "$INSTALL_DIR/zo-tunnel-${binary}"
-        ok "Built and installed zo-tunnel-${binary} → ${INSTALL_DIR}/zo-tunnel-${binary}"
+        chmod +x "$DEST_DIR/zo-tunnel-${binary}"
+        ok "Built and installed zo-tunnel-${binary} → ${DEST_DIR}/zo-tunnel-${binary}"
     done
+fi
+
+# ─── Setup PATH for client ───
+setup_path_needed=false
+for binary in "${BINARIES[@]}"; do
+    if [ "$binary" = "client" ]; then
+        setup_path_needed=true
+    fi
+done
+
+if [ "$setup_path_needed" = true ]; then
+    PATH_LINE='export PATH="$HOME/.zo-tunnel/bin:$PATH"'
+
+    # Add to shell profiles if not already present
+    for rc_file in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+        if [ -f "$rc_file" ]; then
+            if ! grep -qF '.zo-tunnel/bin' "$rc_file" 2>/dev/null; then
+                echo "" >> "$rc_file"
+                echo "# Zo Tunnel client" >> "$rc_file"
+                echo "$PATH_LINE" >> "$rc_file"
+            fi
+        fi
+    done
+
+    # Also export for current session
+    export PATH="$HOME/.zo-tunnel/bin:$PATH"
 fi
 
 # ─── Verify ───
@@ -174,21 +228,27 @@ echo -e "${GREEN}═════════════════════
 echo ""
 
 for binary in "${BINARIES[@]}"; do
-    if command -v "zo-tunnel-${binary}" &>/dev/null; then
+    DEST_DIR=$(get_install_dir "$binary")
+    BIN_PATH="${DEST_DIR}/zo-tunnel-${binary}"
+    if [ -f "$BIN_PATH" ]; then
+        VERSION=$("$BIN_PATH" --version 2>/dev/null || echo "unknown")
+        ok "zo-tunnel-${binary} (${VERSION}) is ready"
+    elif command -v "zo-tunnel-${binary}" &>/dev/null; then
         VERSION=$("zo-tunnel-${binary}" --version 2>/dev/null || echo "unknown")
         ok "zo-tunnel-${binary} (${VERSION}) is ready"
     else
-        warn "zo-tunnel-${binary} installed but not in PATH — add ${INSTALL_DIR} to your PATH"
+        warn "zo-tunnel-${binary} installed but not in PATH — add ${DEST_DIR} to your PATH"
     fi
 done
 
 echo ""
 
 if [ "$COMPONENT" = "client" ] || [ "$COMPONENT" = "all" ]; then
-    if command -v zo-tunnel-client &>/dev/null; then
+    BIN_PATH="${CLIENT_INSTALL_DIR}/zo-tunnel-client"
+    if [ -f "$BIN_PATH" ]; then
+        "$BIN_PATH" start || true
+    elif command -v zo-tunnel-client &>/dev/null; then
         zo-tunnel-client start || true
-    elif [ -f "${INSTALL_DIR}/zo-tunnel-client" ]; then
-        "${INSTALL_DIR}/zo-tunnel-client" start || true
     else
         warn "Could not find zo-tunnel-client binary to start"
     fi

@@ -332,6 +332,12 @@ async fn api_upgrade_check() -> impl IntoResponse {
 
 async fn api_upgrade(State(state): State<AppState>) -> impl IntoResponse {
     let current = env!("CARGO_PKG_VERSION");
+
+    // Capture the binary path before upgrade (the file will be replaced)
+    let binary_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from))
+        .unwrap_or_else(|| "zo-tunnel-client".to_string());
     
     // Perform self update in blocking task
     let update_result = tokio::task::spawn_blocking(move || {
@@ -351,8 +357,10 @@ async fn api_upgrade(State(state): State<AppState>) -> impl IntoResponse {
 
                 // Execute background restart script (completely detached using nohup and &)
                 let restart_cmd = format!(
-                    "nohup sh -c 'sleep 1 && /usr/local/bin/zo-tunnel-client stop && sleep 1 && /usr/local/bin/zo-tunnel-client start --bind {} --port {}' >/dev/null 2>&1 &",
-                    bind, port
+                    "nohup sh -c 'sleep 1 && {bin} stop && sleep 1 && {bin} start --bind {bind} --port {port}' >/dev/null 2>&1 &",
+                    bin = binary_path,
+                    bind = bind,
+                    port = port
                 );
 
                 let status = std::process::Command::new("sh")

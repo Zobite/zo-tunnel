@@ -10,7 +10,36 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const REPO: &str = "Zobite/zo-tunnel";
-const INSTALL_DIR: &str = "/usr/local/bin";
+const SERVER_INSTALL_DIR: &str = "/usr/local/bin";
+
+/// Return the client install directory: `~/.zo-tunnel/bin/`
+pub fn client_install_dir() -> anyhow::Result<PathBuf> {
+    let home = std::env::var("HOME")
+        .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
+    Ok(PathBuf::from(home).join(".zo-tunnel").join("bin"))
+}
+
+/// Detect the install directory from the currently running binary.
+/// Falls back to the appropriate default based on binary name.
+fn detect_install_dir(binary_name: &str) -> anyhow::Result<PathBuf> {
+    // Try to get the directory from the currently running executable
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            // Only use it if it looks like a real install path (not cargo target/debug)
+            let parent_str = parent.to_string_lossy();
+            if !parent_str.contains("/target/") {
+                return Ok(parent.to_path_buf());
+            }
+        }
+    }
+
+    // Fall back to default based on component
+    if binary_name.contains("client") {
+        client_install_dir()
+    } else {
+        Ok(PathBuf::from(SERVER_INSTALL_DIR))
+    }
+}
 
 // ─── ANSI colors ─────────────────────────────────────────────────
 
@@ -149,8 +178,10 @@ pub fn upgrade(binary_name: &str, current_version: &str) -> anyhow::Result<()> {
         anyhow::bail!("Binary not found in tarball: {binary_name}");
     }
 
-    // Replace binary
-    let install_path = PathBuf::from(INSTALL_DIR).join(binary_name);
+    // Detect install dir from running binary (client: ~/.zo-tunnel/bin, server: /usr/local/bin)
+    let install_dir = detect_install_dir(binary_name)?;
+    std::fs::create_dir_all(&install_dir)?;
+    let install_path = install_dir.join(binary_name);
     info(&format!("Replacing {}...", install_path.display()));
 
     // Try direct copy first, fall back to sudo
@@ -194,7 +225,9 @@ pub fn uninstall(
     yes: bool,
     keep_config: bool,
 ) -> anyhow::Result<()> {
-    let install_path = PathBuf::from(INSTALL_DIR).join(binary_name);
+    let install_path = detect_install_dir(binary_name)
+        .map(|d| d.join(binary_name))
+        .unwrap_or_else(|_| PathBuf::from(SERVER_INSTALL_DIR).join(binary_name));
 
     // Show what will be removed
     println!();
@@ -303,7 +336,7 @@ fn systemd_unit_content(binary_path: &str) -> String {
 /// Install and enable the systemd service for zo-tunnel-server.
 /// Creates the service file and runs `systemctl daemon-reload && enable`.
 pub fn install_systemd_service() -> anyhow::Result<()> {
-    let binary_path = format!("{}/zo-tunnel-server", INSTALL_DIR);
+    let binary_path = format!("{}/zo-tunnel-server", SERVER_INSTALL_DIR);
 
     // Also accept the binary at the current executable path
     let exec_path = std::env::current_exe()
