@@ -75,6 +75,7 @@ pub struct DashboardState {
     pub tls_enabled: bool,
     pub domain: String,
     pub sessions: Arc<SessionStore>,
+    pub caddy_manager: Option<Arc<crate::caddy::CaddyManager>>,
 }
 
 pub fn create_router(state: DashboardState) -> Router {
@@ -364,7 +365,17 @@ async fn api_tls_check(
     {
         sub
     } else {
-        // Domain doesn't match our base domain — reject
+        // Domain doesn't match our base domain — try fallback chain
+        if let Some(ref mgr) = state.caddy_manager {
+            if let Some(status) = mgr.check_fallback(requested_domain).await {
+                tracing::debug!(
+                    "TLS check: forwarded '{}' to fallback → {}",
+                    requested_domain,
+                    status
+                );
+                return StatusCode::from_u16(status).unwrap_or(StatusCode::FORBIDDEN);
+            }
+        }
         tracing::debug!(
             "TLS check: rejected '{}' (not under *.{})",
             requested_domain,

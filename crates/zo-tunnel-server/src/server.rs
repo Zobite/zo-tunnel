@@ -133,6 +133,27 @@ impl Server {
             .with_context(|| format!("bind control port {}", self.config.control_port))?;
         tracing::info!("🔌 Control channel on :{}", self.config.control_port);
 
+        // ── Caddy Auto-Register (detect existing on-demand TLS, chain as fallback) ──
+        let caddy_manager = if self.config.caddy.enabled {
+            let our_endpoint = format!(
+                "http://127.0.0.1:{}/api/tls-check",
+                self.config.public_port
+            );
+            let mgr = Arc::new(crate::caddy::CaddyManager::new(
+                self.config.caddy.admin_api.clone(),
+                our_endpoint,
+            ));
+            match mgr.register().await {
+                Ok(()) => Some(mgr),
+                Err(e) => {
+                    tracing::warn!("⚠️  Caddy auto-register failed: {:#}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // ── Dashboard state ──
         let dash_state = DashboardState {
             registry: registry.clone(),
@@ -144,7 +165,13 @@ impl Server {
             sessions: Arc::new(dashboard::SessionStore::new(
                 self.config.dashboard_auth.session_ttl_secs,
             )),
+            caddy_manager: caddy_manager.clone(),
         };
+
+        // Start Caddy watchdog (re-registers if another app overwrites the endpoint)
+        if let Some(ref mgr) = caddy_manager {
+            mgr.start_watchdog();
+        }
 
         if self.config.dashboard_auth_enabled() {
             tracing::info!("🔒 Dashboard authentication enabled");
@@ -196,6 +223,11 @@ impl Server {
         // ── Graceful cleanup ──
         tracing::info!("🧹 Cleaning up...");
         public_task.abort();
+
+        // Restore Caddy fallback endpoint if we had one
+        if let Some(ref mgr) = caddy_manager {
+            mgr.unregister().await;
+        }
 
 
 
