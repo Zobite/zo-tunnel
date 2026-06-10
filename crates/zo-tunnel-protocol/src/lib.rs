@@ -28,10 +28,10 @@ pub const DEFAULT_CONTROL_PORT: u16 = 6200;
 pub const DEFAULT_PUBLIC_PORT: u16 = 6210;
 
 /// Heartbeat interval in seconds
-pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
+pub const HEARTBEAT_INTERVAL_SECS: u64 = 15;
 
-/// Heartbeat timeout in seconds (3 missed heartbeats)
-pub const HEARTBEAT_TIMEOUT_SECS: u64 = 35;
+/// Heartbeat timeout in seconds (5 missed heartbeats)
+pub const HEARTBEAT_TIMEOUT_SECS: u64 = 90;
 
 /// Stream type markers for yamux streams
 pub const STREAM_TYPE_PROXY: u8 = 0x00;
@@ -398,8 +398,8 @@ mod tests {
         assert_eq!(MAX_PAYLOAD_SIZE, 16 * 1024 * 1024);
         assert_eq!(DEFAULT_CONTROL_PORT, 6200);
         assert_eq!(DEFAULT_PUBLIC_PORT, 6210);
-        assert_eq!(HEARTBEAT_INTERVAL_SECS, 10);
-        assert_eq!(HEARTBEAT_TIMEOUT_SECS, 35);
+        assert_eq!(HEARTBEAT_INTERVAL_SECS, 15);
+        assert_eq!(HEARTBEAT_TIMEOUT_SECS, 90);
     }
 }
 

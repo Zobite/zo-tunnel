@@ -72,7 +72,7 @@ where
             tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
         heartbeat_interval.tick().await; // skip first immediate tick
         let mut missed_heartbeats: u32 = 0;
-        const MAX_MISSED: u32 = 3;
+        const MAX_MISSED: u32 = 5;
 
         loop {
             tokio::select! {
@@ -111,7 +111,7 @@ where
                 // ── Heartbeat: periodically open a stream to verify connection ──
                 _ = heartbeat_interval.tick(), if supports_heartbeat => {
                     let hb_result = tokio::time::timeout(
-                        Duration::from_secs(5),
+                        Duration::from_secs(10),
                         async {
                             let mut stream = poll_fn(|cx| conn.poll_new_outbound(cx)).await?;
                             use futures::io::{AsyncReadExt, AsyncWriteExt};
