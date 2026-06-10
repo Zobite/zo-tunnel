@@ -153,7 +153,7 @@ pub async fn handle_proxy_request(
     metrics.active_connections.fetch_add(1, Ordering::Relaxed);
 
     // Open yamux stream to the client
-    let yamux_stream = match client.handle.open_stream().await {
+    let mut yamux_stream = match client.handle.open_stream().await {
         Ok(s) => s,
         Err(e) => {
             client.metrics.active_streams.fetch_sub(1, Ordering::Relaxed);
@@ -165,6 +165,23 @@ pub async fn handle_proxy_request(
             ));
         }
     };
+
+    // Write stream type marker so client can distinguish proxy vs heartbeat (only if client supports it)
+    if client.supports_heartbeat {
+        use futures::io::AsyncWriteExt;
+        if let Err(e) = yamux_stream
+            .write_all(&[zo_tunnel_protocol::STREAM_TYPE_PROXY])
+            .await
+        {
+            client.metrics.active_streams.fetch_sub(1, Ordering::Relaxed);
+            metrics.active_connections.fetch_sub(1, Ordering::Relaxed);
+            tracing::error!("Failed to write stream marker to '{}': {}", client_id, e);
+            return Ok(error_response(
+                StatusCode::BAD_GATEWAY,
+                &format!("Tunnel '{}' connection error", client_id),
+            ));
+        }
+    }
 
     // Compat: yamux uses futures-io, hyper needs tokio-io
     let compat_stream = yamux_stream.compat();

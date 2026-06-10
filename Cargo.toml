@@ -31,6 +31,7 @@ tower-http = { version = "0.6", features = ["cors", "fs"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 rustls-pemfile = "2"
 webpki-roots = "0.26"
+socket2 = { version = "0.5", features = ["all"] }
 
 [profile.release]
 lto = true

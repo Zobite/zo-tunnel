@@ -1,6 +1,6 @@
 [package]
 name = "zo-tunnel-client"
-version = "0.5.15"
+version = "0.5.16"
 edition = "2021"
 
 [dependencies]
@@ -24,3 +24,4 @@ http = { workspace = true }
 dashmap = { workspace = true }
 getrandom = "0.2"
 libc = "0.2"
+socket2 = { workspace = true }

@@ -87,6 +87,12 @@ impl Client {
         let stream = TcpStream::connect(&self.server_addr)
             .await
             .with_context(|| format!("connect to {}", self.server_addr))?;
+
+        // Set TCP keepalive for early dead-connection detection
+        if let Err(e) = Self::configure_tcp_keepalive(&stream) {
+            tracing::warn!("⚠️  TCP keepalive failed: {}", e);
+        }
+
         tracing::info!("Connected to server {}", self.server_addr);
 
         if self.tls_config.enabled {
@@ -171,6 +177,7 @@ impl Client {
         let auth_req = Message::AuthReq(AuthReq {
             client_id: self.client_id.clone(),
             token: self.token.clone(),
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
         });
         write_message(&mut stream, &auth_req).await?;
 
@@ -214,8 +221,41 @@ impl Client {
                 Some(Ok(yamux_stream)) => {
                     let local_addr = self.local_addr.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_tunnel_stream(yamux_stream, &local_addr).await {
-                            tracing::debug!("Stream error: {:#}", e);
+                        let mut yamux_stream = yamux_stream;
+                        // Read stream type marker with timeout to avoid blocking
+                        let mut marker = [0u8; 1];
+                        let marker_result = tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            async {
+                                use futures::io::AsyncReadExt;
+                                yamux_stream.read_exact(&mut marker).await
+                            },
+                        )
+                        .await;
+
+                        match marker_result {
+                            Ok(Ok(_)) if marker[0] == STREAM_TYPE_HEARTBEAT => {
+                                // Heartbeat ping from server — reply with pong
+                                use futures::io::AsyncWriteExt;
+                                let _ =
+                                    yamux_stream.write_all(&[STREAM_TYPE_HEARTBEAT]).await;
+                                let _ = yamux_stream.close().await;
+                                tracing::trace!("💓 Heartbeat pong sent");
+                            }
+                            Ok(Ok(_)) => {
+                                // STREAM_TYPE_PROXY or any other — forward to local service
+                                if let Err(e) =
+                                    Self::handle_tunnel_stream(yamux_stream, &local_addr).await
+                                {
+                                    tracing::debug!("Stream error: {:#}", e);
+                                }
+                            }
+                            Ok(Err(e)) => {
+                                tracing::debug!("Stream marker read error: {:#}", e);
+                            }
+                            Err(_) => {
+                                tracing::debug!("Stream marker read timed out");
+                            }
                         }
                     });
                 }
@@ -259,6 +299,24 @@ impl Client {
             }
         }
 
+        Ok(())
+    }
+
+    /// Configure TCP keepalive on the server socket.
+    fn configure_tcp_keepalive(stream: &TcpStream) -> Result<()> {
+        use socket2::SockRef;
+        use std::time::Duration;
+
+        let sock = SockRef::from(stream);
+        let keepalive = socket2::TcpKeepalive::new()
+            .with_time(Duration::from_secs(HEARTBEAT_INTERVAL_SECS))
+            .with_interval(Duration::from_secs(5));
+
+        #[cfg(target_os = "linux")]
+        let keepalive = keepalive.with_retries(3);
+
+        sock.set_tcp_keepalive(&keepalive)
+            .context("set TCP keepalive")?;
         Ok(())
     }
 }

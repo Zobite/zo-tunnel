@@ -12,6 +12,7 @@ pub struct ClientEntry {
     pub handle: YamuxHandle,
     pub connected_at: Instant,
     pub metrics: ClientMetrics,
+    pub supports_heartbeat: bool,
 }
 
 /// Per-client traffic metrics.
@@ -61,6 +62,7 @@ impl Registry {
         &self,
         client_id: String,
         handle: YamuxHandle,
+        supports_heartbeat: bool,
     ) -> anyhow::Result<Arc<ClientEntry>> {
         use dashmap::mapref::entry::Entry;
 
@@ -77,6 +79,7 @@ impl Registry {
             handle,
             connected_at: Instant::now(),
             metrics: ClientMetrics::new(),
+            supports_heartbeat,
         });
 
         match self.clients.entry(client_id.clone()) {

@@ -15,6 +15,7 @@ use hyper_util::rt::TokioIo;
 use std::future::poll_fn;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::TokioAsyncReadCompatExt;
@@ -52,6 +53,7 @@ fn spawn_yamux_driver<S>(
     stream: S,
     mode: yamux::Mode,
     client_id: String,
+    supports_heartbeat: bool,
 ) -> (YamuxHandle, tokio::task::JoinHandle<()>)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -64,6 +66,13 @@ where
         let compat = stream.compat();
         let cfg = yamux::Config::default();
         let mut conn = yamux::Connection::new(compat, cfg, mode);
+
+        // ── Heartbeat timer ──
+        let mut heartbeat_interval =
+            tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+        heartbeat_interval.tick().await; // skip first immediate tick
+        let mut missed_heartbeats: u32 = 0;
+        const MAX_MISSED: u32 = 3;
 
         loop {
             tokio::select! {
@@ -97,6 +106,52 @@ where
                             tracing::debug!("All yamux handles dropped for '{}'", client_id);
                             break;
                         }
+                    }
+                }
+                // ── Heartbeat: periodically open a stream to verify connection ──
+                _ = heartbeat_interval.tick(), if supports_heartbeat => {
+                    let hb_result = tokio::time::timeout(
+                        Duration::from_secs(5),
+                        async {
+                            let mut stream = poll_fn(|cx| conn.poll_new_outbound(cx)).await?;
+                            use futures::io::{AsyncReadExt, AsyncWriteExt};
+                            stream.write_all(&[STREAM_TYPE_HEARTBEAT]).await?;
+                            // Wait for pong reply to confirm client is alive
+                            let mut pong = [0u8; 1];
+                            stream.read_exact(&mut pong).await?;
+                            stream.close().await?;
+                            Ok::<(), anyhow::Error>(())
+                        },
+                    )
+                    .await;
+
+                    match hb_result {
+                        Ok(Ok(())) => {
+                            missed_heartbeats = 0;
+                            tracing::trace!("💓 Heartbeat OK for '{}'", client_id);
+                        }
+                        Ok(Err(e)) => {
+                            missed_heartbeats += 1;
+                            tracing::warn!(
+                                "💔 Heartbeat failed for '{}': {} ({}/{})",
+                                client_id, e, missed_heartbeats, MAX_MISSED
+                            );
+                        }
+                        Err(_) => {
+                            missed_heartbeats += 1;
+                            tracing::warn!(
+                                "💔 Heartbeat timeout for '{}' ({}/{})",
+                                client_id, missed_heartbeats, MAX_MISSED
+                            );
+                        }
+                    }
+
+                    if missed_heartbeats >= MAX_MISSED {
+                        tracing::error!(
+                            "💀 Connection dead for '{}' — {} missed heartbeats, disconnecting",
+                            client_id, missed_heartbeats
+                        );
+                        break;
                     }
                 }
             }
@@ -261,6 +316,11 @@ impl Server {
                     tracing::info!("📡 Client connecting from {}", addr);
                     metrics.total_connections.fetch_add(1, Ordering::Relaxed);
 
+                    // Set TCP keepalive for early dead-connection detection
+                    if let Err(e) = Self::configure_tcp_keepalive(&stream) {
+                        tracing::warn!("⚠️  TCP keepalive failed for {}: {}", addr, e);
+                    }
+
                     let reg = registry.clone();
                     let met = metrics.clone();
                     let cfg = config.clone();
@@ -298,7 +358,7 @@ impl Server {
         .map_err(|_| anyhow::anyhow!("auth timeout: client did not send AuthReq within 10s"))?
         .context("read auth message")?;
 
-        let client_id = match auth_msg {
+        let (client_id, supports_heartbeat) = match auth_msg {
             Message::AuthReq(auth) => {
                 tracing::info!("🔑 Auth from '{}'", auth.client_id);
 
@@ -330,7 +390,8 @@ impl Server {
                     config.domain
                 );
 
-                auth.client_id
+                let supports_hb = auth.supports_heartbeat();
+                (auth.client_id, supports_hb)
             }
             other => {
                 tracing::warn!("Expected AuthReq, got {:?}", other);
@@ -340,10 +401,10 @@ impl Server {
 
         // ── Spawn yamux driver ──
         let (yamux_handle, driver_task) =
-            spawn_yamux_driver(stream, yamux::Mode::Server, client_id.clone());
+            spawn_yamux_driver(stream, yamux::Mode::Server, client_id.clone(), supports_heartbeat);
 
         // Register client
-        let _entry = match registry.register(client_id.clone(), yamux_handle.clone()) {
+        let _entry = match registry.register(client_id.clone(), yamux_handle.clone(), supports_heartbeat) {
             Ok(e) => e,
             Err(e) => {
                 tracing::warn!("Registration failed for '{}': {}", client_id, e);
@@ -500,5 +561,22 @@ impl Server {
             .boxed();
 
         Ok(Response::from_parts(parts, box_body))
+    }
+
+    /// Configure TCP keepalive on a client socket.
+    fn configure_tcp_keepalive(stream: &tokio::net::TcpStream) -> Result<()> {
+        use socket2::SockRef;
+
+        let sock = SockRef::from(stream);
+        let keepalive = socket2::TcpKeepalive::new()
+            .with_time(Duration::from_secs(HEARTBEAT_INTERVAL_SECS))
+            .with_interval(Duration::from_secs(5));
+
+        #[cfg(target_os = "linux")]
+        let keepalive = keepalive.with_retries(3);
+
+        sock.set_tcp_keepalive(&keepalive)
+            .context("set TCP keepalive")?;
+        Ok(())
     }
 }

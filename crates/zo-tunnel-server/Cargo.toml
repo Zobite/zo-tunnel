@@ -1,6 +1,6 @@
 [package]
 name = "zo-tunnel-server"
-version = "0.5.15"
+version = "0.5.16"
 edition = "2021"
 
 [dependencies]
@@ -30,3 +30,4 @@ tokio-rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 subtle = "2"
 getrandom = "0.2"
+socket2 = { workspace = true }

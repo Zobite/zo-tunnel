@@ -33,6 +33,10 @@ pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
 /// Heartbeat timeout in seconds (3 missed heartbeats)
 pub const HEARTBEAT_TIMEOUT_SECS: u64 = 35;
 
+/// Stream type markers for yamux streams
+pub const STREAM_TYPE_PROXY: u8 = 0x00;
+pub const STREAM_TYPE_HEARTBEAT: u8 = 0x01;
+
 // ─── Message Types ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +79,16 @@ impl TryFrom<u8> for MessageType {
 pub struct AuthReq {
     pub client_id: String,
     pub token: String,
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+impl AuthReq {
+    /// Check if the client version supports heartbeat and stream type markers.
+    /// Legacy clients do not send a version field.
+    pub fn supports_heartbeat(&self) -> bool {
+        self.version.is_some()
+    }
 }
 
 /// Authentication response from server
@@ -256,6 +270,7 @@ mod tests {
         let msg = Message::AuthReq(AuthReq {
             client_id: "test-client".into(),
             token: "secret123".into(),
+            version: None,
         });
 
         write_message(&mut client, &msg).await.unwrap();
@@ -364,6 +379,7 @@ mod tests {
         let msg = Message::AuthReq(AuthReq {
             client_id: long_id.clone(),
             token: "t".into(),
+            version: None,
         });
 
         write_message(&mut client, &msg).await.unwrap();
