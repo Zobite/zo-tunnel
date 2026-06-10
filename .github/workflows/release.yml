@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ─── Run tests before building ───
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace -- -D warnings
+
+  # ─── Build matrix ───
+  build:
+    name: Build ${{ matrix.label }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            label: linux-amd64
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            label: linux-arm64
+            cross: true
+
+          - target: x86_64-apple-darwin
+            os: macos-13
+            label: darwin-amd64
+
+          - target: aarch64-apple-darwin
+            os: macos-14
+            label: darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # ARM64 Linux cross-compiler
+      - name: Install cross-compiler (Linux ARM64)
+        if: matrix.cross
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu
+          mkdir -p .cargo
+          cat >> .cargo/config.toml <<'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Build release binaries
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            --bin zo-tunnel-server --bin zo-tunnel-client
+
+      - name: Package binaries
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          for binary in zo-tunnel-server zo-tunnel-client; do
+            BIN="target/${{ matrix.target }}/release/${binary}"
+            if [ -f "$BIN" ]; then
+              TAR="${binary}-${TAG}-${{ matrix.label }}.tar.gz"
+              tar -czf "$TAR" -C "target/${{ matrix.target }}/release" "$binary"
+              echo "📦 $TAR ($(du -h "$TAR" | cut -f1))"
+            fi
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.label }}
+          path: "*.tar.gz"
+          retention-days: 1
+
+  # ─── Create GitHub Release ───
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz > SHA256SUMS.txt
+
+      - name: List release files
+        run: ls -lh dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+          body: |
+            ## Install
+
+            **Server (Linux VPS):**
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sudo bash -s server
+            zo-tunnel-server start --domain tunnel.example.com
+            ```
+
+            **Client (macOS / Linux):**
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | bash
+            ```
