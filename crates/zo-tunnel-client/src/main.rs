@@ -198,8 +198,7 @@ fn cmd_start(args: StartArgs) -> Result<()> {
     }
 
     // Get current executable path
-    let exe = std::env::current_exe()
-        .context("failed to determine current executable path")?;
+    let exe = std::env::current_exe().context("failed to determine current executable path")?;
 
     // Determine log file path
     let log_dir = config::credentials_dir()?;
@@ -212,7 +211,8 @@ fn cmd_start(args: StartArgs) -> Result<()> {
         .append(true)
         .open(&log_file_path)
         .context("failed to open log file")?;
-    let log_file_err = log_file.try_clone()
+    let log_file_err = log_file
+        .try_clone()
         .context("failed to clone log file handle")?;
 
     // Spawn the process in the background with `foreground` subcommand.
@@ -426,7 +426,14 @@ fn cmd_status() -> Result<()> {
         Some(creds) => {
             eprintln!("  Server:  {}", creds.server);
             eprintln!("  Token:   {}", creds.masked_token());
-            eprintln!("  TLS:     {}", if creds.tls.enabled { "enabled" } else { "disabled" });
+            eprintln!(
+                "  TLS:     {}",
+                if creds.tls.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            );
 
             match config::TunnelsConfig::load() {
                 Ok(cfg) => {
@@ -449,10 +456,7 @@ fn cmd_status() -> Result<()> {
 
 /// `zo-tunnel-client upgrade`
 fn cmd_upgrade() -> Result<()> {
-    zo_tunnel_protocol::self_update::upgrade(
-        "zo-tunnel-client",
-        env!("CARGO_PKG_VERSION"),
-    )
+    zo_tunnel_protocol::self_update::upgrade("zo-tunnel-client", env!("CARGO_PKG_VERSION"))
 }
 
 /// `zo-tunnel-client uninstall`

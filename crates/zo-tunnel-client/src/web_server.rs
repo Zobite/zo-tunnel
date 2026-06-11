@@ -170,7 +170,10 @@ fn security_headers() -> [(header::HeaderName, HeaderValue); 4] {
 
 async fn ui_html() -> impl IntoResponse {
     let headers = security_headers();
-    (headers, Html(include_str!("../../../web/client/index.html")))
+    (
+        headers,
+        Html(include_str!("../../../web/client/index.html")),
+    )
 }
 
 async fn ui_css() -> impl IntoResponse {
@@ -260,7 +263,13 @@ async fn api_connect(
     }
 
     match state
-        .connect(server, token, payload.tls, payload.tls_server_name, payload.tls_skip_verify)
+        .connect(
+            server,
+            token,
+            payload.tls,
+            payload.tls_server_name,
+            payload.tls_skip_verify,
+        )
         .await
     {
         Ok(_) => ok_response("connected").into_response(),
@@ -324,7 +333,8 @@ async fn api_upgrade_check() -> impl IntoResponse {
                 current: format!("v{}", current),
                 latest,
                 upgrade_available,
-            }).into_response()
+            })
+            .into_response()
         }
         _ => err_response("Failed to fetch latest version from GitHub".into()).into_response(),
     }
@@ -338,11 +348,12 @@ async fn api_upgrade(State(state): State<AppState>) -> impl IntoResponse {
         .ok()
         .and_then(|p| p.to_str().map(String::from))
         .unwrap_or_else(|| "zo-tunnel-client".to_string());
-    
+
     // Perform self update in blocking task
     let update_result = tokio::task::spawn_blocking(move || {
         zo_tunnel_protocol::self_update::upgrade("zo-tunnel-client", current)
-    }).await;
+    })
+    .await;
 
     match update_result {
         Ok(Ok(())) => {

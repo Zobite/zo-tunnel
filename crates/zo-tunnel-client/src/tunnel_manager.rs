@@ -160,7 +160,10 @@ impl TunnelManager {
             let max_backoff = 30u64;
 
             loop {
-                match client.run_cancellable(cancel_clone.clone(), status_tx.clone()).await {
+                match client
+                    .run_cancellable(cancel_clone.clone(), status_tx.clone())
+                    .await
+                {
                     Ok(_) => {
                         let _ = status_tx.send(TunnelStatus::Stopped);
                         backoff_secs = 1;
@@ -206,7 +209,11 @@ impl TunnelManager {
         };
 
         self.tunnels.insert(entry.id.clone(), handle);
-        tracing::info!("▶ Started tunnel '{}' → {}", entry.client_id, entry.local_addr);
+        tracing::info!(
+            "▶ Started tunnel '{}' → {}",
+            entry.client_id,
+            entry.local_addr
+        );
 
         Ok(())
     }
@@ -317,14 +324,12 @@ impl TunnelManager {
         snapshots
             .into_iter()
             .zip(health_results)
-            .map(|((entry, server_status), local_ok)| {
-                TunnelInfo {
-                    id: entry.id,
-                    client_id: entry.client_id,
-                    local_addr: entry.local_addr,
-                    enabled: entry.enabled,
-                    status: TunnelStatusInfo::from_status(&server_status, local_ok),
-                }
+            .map(|((entry, server_status), local_ok)| TunnelInfo {
+                id: entry.id,
+                client_id: entry.client_id,
+                local_addr: entry.local_addr,
+                enabled: entry.enabled,
+                status: TunnelStatusInfo::from_status(&server_status, local_ok),
             })
             .collect()
     }

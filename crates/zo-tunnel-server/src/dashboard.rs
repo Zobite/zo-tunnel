@@ -170,7 +170,10 @@ fn is_tls_enabled(state: &DashboardState, headers: &HeaderMap) -> bool {
     if state.tls_enabled {
         return true;
     }
-    if let Some(proto) = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) {
+    if let Some(proto) = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+    {
         if proto.trim().eq_ignore_ascii_case("https") {
             return true;
         }
@@ -215,11 +218,7 @@ async fn api_login(
     if check_cfg.validate_dashboard_token(&payload.token) {
         let session_id = state.sessions.create();
         let tls_enabled = is_tls_enabled(&state, &headers);
-        let cookie = build_session_cookie(
-            &session_id,
-            state.sessions.ttl_secs,
-            tls_enabled,
-        );
+        let cookie = build_session_cookie(&session_id, state.sessions.ttl_secs, tls_enabled);
 
         let mut resp_headers = HeaderMap::new();
         resp_headers.insert(
@@ -262,10 +261,7 @@ async fn api_auth_check(
     })
 }
 
-async fn api_logout(
-    State(state): State<DashboardState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn api_logout(State(state): State<DashboardState>, headers: HeaderMap) -> impl IntoResponse {
     // Invalidate the session
     if let Some(session_id) = extract_session_id(&headers) {
         state.sessions.invalidate(&session_id);
@@ -296,10 +292,7 @@ struct StatusResponse {
     connected_clients: usize,
 }
 
-async fn api_status(
-    State(state): State<DashboardState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn api_status(State(state): State<DashboardState>, headers: HeaderMap) -> impl IntoResponse {
     if !is_authenticated(&state, &headers) {
         return Err((
             StatusCode::UNAUTHORIZED,
@@ -313,10 +306,7 @@ async fn api_status(
     }))
 }
 
-async fn api_clients(
-    State(state): State<DashboardState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn api_clients(State(state): State<DashboardState>, headers: HeaderMap) -> impl IntoResponse {
     if !is_authenticated(&state, &headers) {
         return Err((
             StatusCode::UNAUTHORIZED,
@@ -326,10 +316,7 @@ async fn api_clients(
     Ok(Json(state.registry.list()))
 }
 
-async fn api_metrics(
-    State(state): State<DashboardState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn api_metrics(State(state): State<DashboardState>, headers: HeaderMap) -> impl IntoResponse {
     if !is_authenticated(&state, &headers) {
         return Err((
             StatusCode::UNAUTHORIZED,
@@ -386,13 +373,19 @@ async fn api_tls_check(
 
     // Allow reserved subdomains (dashboard, etc.)
     if crate::config::RESERVED_SUBDOMAINS.contains(&subdomain) {
-        tracing::debug!("TLS check: approved '{}' (reserved subdomain)", requested_domain);
+        tracing::debug!(
+            "TLS check: approved '{}' (reserved subdomain)",
+            requested_domain
+        );
         return StatusCode::OK;
     }
 
     // Check if the subdomain corresponds to a connected client
     if state.registry.get(subdomain).is_some() {
-        tracing::debug!("TLS check: approved '{}' (client connected)", requested_domain);
+        tracing::debug!(
+            "TLS check: approved '{}' (client connected)",
+            requested_domain
+        );
         return StatusCode::OK;
     }
 

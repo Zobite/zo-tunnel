@@ -13,7 +13,6 @@ use tokio_util::compat::FuturesAsyncReadCompatExt;
 
 pub type BoxBody = http_body_util::combinators::BoxBody<bytes::Bytes, hyper::Error>;
 
-
 fn full_body(data: impl Into<bytes::Bytes>) -> BoxBody {
     http_body_util::Full::new(data.into())
         .map_err(|never| match never {})
@@ -21,11 +20,7 @@ fn full_body(data: impl Into<bytes::Bytes>) -> BoxBody {
 }
 
 fn error_response(status: StatusCode, msg: &str) -> Response<BoxBody> {
-    let body = format!(
-        r#"{{"error":"{}","status":{}}}"#,
-        msg,
-        status.as_u16()
-    );
+    let body = format!(r#"{{"error":"{}","status":{}}}"#, msg, status.as_u16());
     Response::builder()
         .status(status)
         .header("content-type", "application/json")
@@ -36,21 +31,13 @@ fn error_response(status: StatusCode, msg: &str) -> Response<BoxBody> {
 
 /// Extract client_id and forwarded path from an HTTP request.
 /// Uses subdomain routing: <client_id>.<domain> → (client_id, original_path)
-fn extract_routing(
-    req: &Request<Incoming>,
-    domain: &str,
-) -> Option<(String, String)> {
-    let host = req
-        .headers()
-        .get("host")
-        .and_then(|v| v.to_str().ok())?;
+fn extract_routing(req: &Request<Incoming>, domain: &str) -> Option<(String, String)> {
+    let host = req.headers().get("host").and_then(|v| v.to_str().ok())?;
     // Strip port if present (e.g. "webapp.tunnel.zobite.com:6210" → "webapp.tunnel.zobite.com")
     let host_no_port = host.split(':').next().unwrap_or(host);
     let suffix = format!(".{}", domain);
     if host_no_port.ends_with(&suffix) {
-        let client_id = host_no_port
-            .strip_suffix(&suffix)?
-            .to_string();
+        let client_id = host_no_port.strip_suffix(&suffix)?.to_string();
         if client_id.is_empty() {
             return None;
         }
@@ -116,9 +103,10 @@ pub async fn handle_proxy_request(
                     "No tunnel clients connected",
                 ));
             }
-            let client_list: Vec<String> = clients.iter().map(|c| {
-                format!("{}.{}", c.client_id, domain)
-            }).collect();
+            let client_list: Vec<String> = clients
+                .iter()
+                .map(|c| format!("{}.{}", c.client_id, domain))
+                .collect();
             let msg = format!(
                 "Invalid subdomain. Available tunnels: {}",
                 client_list.join(", ")
@@ -149,14 +137,20 @@ pub async fn handle_proxy_request(
 
     // Track metrics
     client.metrics.requests.fetch_add(1, Ordering::Relaxed);
-    client.metrics.active_streams.fetch_add(1, Ordering::Relaxed);
+    client
+        .metrics
+        .active_streams
+        .fetch_add(1, Ordering::Relaxed);
     metrics.active_connections.fetch_add(1, Ordering::Relaxed);
 
     // Open yamux stream to the client
     let mut yamux_stream = match client.handle.open_stream().await {
         Ok(s) => s,
         Err(e) => {
-            client.metrics.active_streams.fetch_sub(1, Ordering::Relaxed);
+            client
+                .metrics
+                .active_streams
+                .fetch_sub(1, Ordering::Relaxed);
             metrics.active_connections.fetch_sub(1, Ordering::Relaxed);
             tracing::error!("Failed to open yamux stream to '{}': {}", client_id, e);
             return Ok(error_response(
@@ -173,7 +167,10 @@ pub async fn handle_proxy_request(
             .write_all(&[zo_tunnel_protocol::STREAM_TYPE_PROXY])
             .await
         {
-            client.metrics.active_streams.fetch_sub(1, Ordering::Relaxed);
+            client
+                .metrics
+                .active_streams
+                .fetch_sub(1, Ordering::Relaxed);
             metrics.active_connections.fetch_sub(1, Ordering::Relaxed);
             tracing::error!("Failed to write stream marker to '{}': {}", client_id, e);
             return Ok(error_response(
@@ -191,7 +188,10 @@ pub async fn handle_proxy_request(
     let (mut sender, conn) = match hyper::client::conn::http1::handshake(io).await {
         Ok(r) => r,
         Err(e) => {
-            client.metrics.active_streams.fetch_sub(1, Ordering::Relaxed);
+            client
+                .metrics
+                .active_streams
+                .fetch_sub(1, Ordering::Relaxed);
             metrics.active_connections.fetch_sub(1, Ordering::Relaxed);
             tracing::error!("HTTP handshake to '{}' failed: {}", client_id, e);
             return Ok(error_response(
@@ -213,7 +213,10 @@ pub async fn handle_proxy_request(
     let forwarded = match build_forwarded_request(req, &path, &client_id) {
         Ok(r) => r,
         Err(e) => {
-            client.metrics.active_streams.fetch_sub(1, Ordering::Relaxed);
+            client
+                .metrics
+                .active_streams
+                .fetch_sub(1, Ordering::Relaxed);
             metrics.active_connections.fetch_sub(1, Ordering::Relaxed);
             tracing::error!("Build forwarded request failed: {}", e);
             return Ok(error_response(
@@ -226,7 +229,10 @@ pub async fn handle_proxy_request(
     let resp = match sender.send_request(forwarded).await {
         Ok(resp) => resp,
         Err(e) => {
-            client.metrics.active_streams.fetch_sub(1, Ordering::Relaxed);
+            client
+                .metrics
+                .active_streams
+                .fetch_sub(1, Ordering::Relaxed);
             metrics.active_connections.fetch_sub(1, Ordering::Relaxed);
             tracing::error!("Proxy request to '{}' failed: {}", client_id, e);
             return Ok(error_response(
@@ -236,7 +242,10 @@ pub async fn handle_proxy_request(
         }
     };
 
-    client.metrics.active_streams.fetch_sub(1, Ordering::Relaxed);
+    client
+        .metrics
+        .active_streams
+        .fetch_sub(1, Ordering::Relaxed);
     metrics.active_connections.fetch_sub(1, Ordering::Relaxed);
 
     tracing::info!(
@@ -262,11 +271,7 @@ pub async fn handle_proxy_request(
 mod tests {
 
     /// Pure subdomain-based routing extraction (mirrors extract_routing logic).
-    fn extract_subdomain_routing(
-        host: &str,
-        path: &str,
-        domain: &str,
-    ) -> Option<(String, String)> {
+    fn extract_subdomain_routing(host: &str, path: &str, domain: &str) -> Option<(String, String)> {
         let host_no_port = host.split(':').next().unwrap_or(host);
         let suffix = format!(".{}", domain);
         if host_no_port.ends_with(&suffix) {
@@ -282,13 +287,18 @@ mod tests {
 
     #[test]
     fn test_subdomain_routing_basic() {
-        let result = extract_subdomain_routing("webapp.tunnel.zobite.com", "/api/users", "tunnel.zobite.com");
+        let result = extract_subdomain_routing(
+            "webapp.tunnel.zobite.com",
+            "/api/users",
+            "tunnel.zobite.com",
+        );
         assert_eq!(result, Some(("webapp".into(), "/api/users".into())));
     }
 
     #[test]
     fn test_subdomain_routing_with_port() {
-        let result = extract_subdomain_routing("webapp.tunnel.zobite.com:6210", "/", "tunnel.zobite.com");
+        let result =
+            extract_subdomain_routing("webapp.tunnel.zobite.com:6210", "/", "tunnel.zobite.com");
         assert_eq!(result, Some(("webapp".into(), "/".into())));
     }
 
@@ -306,14 +316,24 @@ mod tests {
 
     #[test]
     fn test_subdomain_path_preserved() {
-        let result = extract_subdomain_routing("myapp.tunnel.zobite.com", "/dashboard/settings?tab=profile", "tunnel.zobite.com");
-        assert_eq!(result, Some(("myapp".into(), "/dashboard/settings?tab=profile".into())));
+        let result = extract_subdomain_routing(
+            "myapp.tunnel.zobite.com",
+            "/dashboard/settings?tab=profile",
+            "tunnel.zobite.com",
+        );
+        assert_eq!(
+            result,
+            Some(("myapp".into(), "/dashboard/settings?tab=profile".into()))
+        );
     }
 
     #[test]
     fn test_subdomain_deep_path() {
-        let result = extract_subdomain_routing("api.tunnel.zobite.com", "/v2/users/123/posts", "tunnel.zobite.com");
+        let result = extract_subdomain_routing(
+            "api.tunnel.zobite.com",
+            "/v2/users/123/posts",
+            "tunnel.zobite.com",
+        );
         assert_eq!(result, Some(("api".into(), "/v2/users/123/posts".into())));
     }
 }
-

@@ -178,7 +178,9 @@ impl Server {
 
         // ── Validate domain ──
         if self.config.domain.is_empty() {
-            anyhow::bail!("domain is required — run `zo-tunnel-server setup --domain <domain>` first");
+            anyhow::bail!(
+                "domain is required — run `zo-tunnel-server setup --domain <domain>` first"
+            );
         }
         let domain = &self.config.domain;
 
@@ -190,10 +192,8 @@ impl Server {
 
         // ── Caddy Auto-Register (detect existing on-demand TLS, chain as fallback) ──
         let caddy_manager = if self.config.caddy.enabled {
-            let our_endpoint = format!(
-                "http://127.0.0.1:{}/api/tls-check",
-                self.config.public_port
-            );
+            let our_endpoint =
+                format!("http://127.0.0.1:{}/api/tls-check", self.config.public_port);
             let mgr = Arc::new(crate::caddy::CaddyManager::new(
                 self.config.caddy.admin_api.clone(),
                 our_endpoint,
@@ -256,8 +256,15 @@ impl Server {
         let rl_pub = rate_limiter.clone();
         let dom = domain.clone();
         let public_task = tokio::spawn(async move {
-            Self::accept_public(public_listener, reg_pub, met_pub, rl_pub, dom, dashboard_router)
-                .await;
+            Self::accept_public(
+                public_listener,
+                reg_pub,
+                met_pub,
+                rl_pub,
+                dom,
+                dashboard_router,
+            )
+            .await;
         });
 
         tracing::info!("✅ Zo Tunnel Server ready!");
@@ -283,8 +290,6 @@ impl Server {
         if let Some(ref mgr) = caddy_manager {
             mgr.unregister().await;
         }
-
-
 
         let connected = registry.count();
         if connected > 0 {
@@ -400,18 +405,23 @@ impl Server {
         };
 
         // ── Spawn yamux driver ──
-        let (yamux_handle, driver_task) =
-            spawn_yamux_driver(stream, yamux::Mode::Server, client_id.clone(), supports_heartbeat);
+        let (yamux_handle, driver_task) = spawn_yamux_driver(
+            stream,
+            yamux::Mode::Server,
+            client_id.clone(),
+            supports_heartbeat,
+        );
 
         // Register client
-        let _entry = match registry.register(client_id.clone(), yamux_handle.clone(), supports_heartbeat) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::warn!("Registration failed for '{}': {}", client_id, e);
-                driver_task.abort();
-                return Ok(());
-            }
-        };
+        let _entry =
+            match registry.register(client_id.clone(), yamux_handle.clone(), supports_heartbeat) {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!("Registration failed for '{}': {}", client_id, e);
+                    driver_task.abort();
+                    return Ok(());
+                }
+            };
 
         tracing::info!(
             "🟢 Client '{}' registered (total: {})",
@@ -419,15 +429,11 @@ impl Server {
             registry.count()
         );
 
-
-
         // Wait for the yamux driver to finish (= client disconnect)
         let _ = driver_task.await;
 
         // Client disconnected — unregister
         registry.unregister(&client_id);
-
-
 
         tracing::info!(
             "🔴 Client '{}' disconnected (remaining: {})",
@@ -464,7 +470,8 @@ impl Server {
             let dash = dashboard_router.clone();
 
             tokio::spawn(async move {
-                let result = Self::serve_http(TokioIo::new(tcp_stream), reg, met, rl, dom, dash).await;
+                let result =
+                    Self::serve_http(TokioIo::new(tcp_stream), reg, met, rl, dom, dash).await;
                 if let Err(e) = result {
                     tracing::debug!("HTTP error from {}: {}", addr, e);
                 }
@@ -540,15 +547,12 @@ impl Server {
         let axum_req = Request::from_parts(parts, axum_body);
 
         // Call the axum router
-        let axum_resp = router
-            .oneshot(axum_req)
-            .await
-            .unwrap_or_else(|_| {
-                Response::builder()
-                    .status(500)
-                    .body(axum::body::Body::empty())
-                    .unwrap()
-            });
+        let axum_resp = router.oneshot(axum_req).await.unwrap_or_else(|_| {
+            Response::builder()
+                .status(500)
+                .body(axum::body::Body::empty())
+                .unwrap()
+        });
 
         // Convert axum response → proxy BoxBody by collecting bytes
         let (parts, axum_body) = axum_resp.into_parts();

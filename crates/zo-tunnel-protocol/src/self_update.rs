@@ -14,8 +14,8 @@ const SERVER_INSTALL_DIR: &str = "/usr/local/bin";
 
 /// Return the client install directory: `~/.zo-tunnel/bin/`
 pub fn client_install_dir() -> anyhow::Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
+    let home =
+        std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
     Ok(PathBuf::from(home).join(".zo-tunnel").join("bin"))
 }
 
@@ -142,9 +142,7 @@ pub fn upgrade(binary_name: &str, current_version: &str) -> anyhow::Result<()> {
 
     let target = detect_target()?;
     let tarball = format!("{binary_name}-{latest_tag}-{target}.tar.gz");
-    let url = format!(
-        "https://github.com/{REPO}/releases/download/{latest_tag}/{tarball}"
-    );
+    let url = format!("https://github.com/{REPO}/releases/download/{latest_tag}/{tarball}");
 
     info(&format!("Downloading {tarball}..."));
 
@@ -166,7 +164,12 @@ pub fn upgrade(binary_name: &str, current_version: &str) -> anyhow::Result<()> {
 
     // Extract
     let status = Command::new("tar")
-        .args(["-xzf", tar_path.to_str().unwrap(), "-C", tmp_dir.to_str().unwrap()])
+        .args([
+            "-xzf",
+            tar_path.to_str().unwrap(),
+            "-C",
+            tmp_dir.to_str().unwrap(),
+        ])
         .status()?;
 
     if !status.success() {
@@ -564,10 +567,7 @@ mod tests {
         assert!(target.is_ok());
         let t = target.unwrap();
         assert!(
-            t == "linux-amd64"
-                || t == "linux-arm64"
-                || t == "darwin-amd64"
-                || t == "darwin-arm64"
+            t == "linux-amd64" || t == "linux-arm64" || t == "darwin-amd64" || t == "darwin-arm64"
         );
     }
 }

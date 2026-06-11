@@ -37,11 +37,6 @@ pub struct ServerConfig {
     pub log_level: String,
 }
 
-
-
-
-
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AuthConfig {
     #[serde(default)]
@@ -68,7 +63,6 @@ impl Default for DashboardAuthConfig {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimitConfig {
     #[serde(default = "default_rps")]
@@ -85,8 +79,6 @@ impl Default for RateLimitConfig {
         }
     }
 }
-
-
 
 fn default_control_port() -> u16 {
     zo_tunnel_protocol::DEFAULT_CONTROL_PORT
@@ -121,8 +113,6 @@ impl Default for ServerConfig {
         }
     }
 }
-
-
 
 impl ServerConfig {
     /// Config directory for saving (used by `start --domain`).
@@ -179,8 +169,9 @@ impl ServerConfig {
              # Config path: {}\n\
              #\n\
              # To reconfigure, run: zo-tunnel-server start --domain YOUR_DOMAIN --force\n\
-             \n{}", 
-            path.display(), yaml
+             \n{}",
+            path.display(),
+            yaml
         );
 
         std::fs::write(&path, content)

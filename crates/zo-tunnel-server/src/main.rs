@@ -2,13 +2,13 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
+mod caddy;
 mod config;
 mod dashboard;
 mod metrics;
 mod proxy;
 mod registry;
 mod server;
-mod caddy;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -93,8 +93,6 @@ struct LogsArgs {
     follow: bool,
 }
 
-
-
 #[derive(Parser, Debug)]
 struct UninstallArgs {
     /// Skip confirmation prompt
@@ -147,8 +145,7 @@ async fn cmd_start(args: StartArgs) -> Result<()> {
             (cfg, true)
         } else {
             // Load existing config
-            let cfg = config::ServerConfig::load(path)
-                .context("load config")?;
+            let cfg = config::ServerConfig::load(path).context("load config")?;
             (cfg, false)
         }
     } else {
@@ -175,11 +172,9 @@ async fn cmd_start(args: StartArgs) -> Result<()> {
 
     // ── Start or restart the service ──
     if zo_tunnel_protocol::self_update::is_service_active() {
-        zo_tunnel_protocol::self_update::restart_service()
-            .context("restart service")?;
+        zo_tunnel_protocol::self_update::restart_service().context("restart service")?;
     } else {
-        zo_tunnel_protocol::self_update::start_service()
-            .context("start service")?;
+        zo_tunnel_protocol::self_update::start_service().context("start service")?;
     }
 
     // ── Print summary ──
@@ -232,7 +227,10 @@ fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
     println!();
 
     if config_created {
-        println!("  Config saved to: {}", config::ServerConfig::config_path().display());
+        println!(
+            "  Config saved to: {}",
+            config::ServerConfig::config_path().display()
+        );
         println!();
     }
 
@@ -246,7 +244,12 @@ fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
     println!();
 
     // Always show tokens and connect info
-    let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
+    let client_token = cfg
+        .auth
+        .tokens
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("(none)");
     let dashboard_token = &cfg.dashboard_auth.token;
     let scheme = if cfg.caddy.enabled { "https" } else { "http" };
 
@@ -254,18 +257,30 @@ fn print_summary(cfg: &config::ServerConfig, config_created: bool) {
     println!("  🔑 Dashboard token:  {}", dashboard_token);
     println!();
     println!("  ▸ Login (save credentials):");
-    println!("    zo-tunnel-client login --server {}:{} --token {}", server_ip, cfg.control_port, client_token);
+    println!(
+        "    zo-tunnel-client login --server {}:{} --token {}",
+        server_ip, cfg.control_port, client_token
+    );
     println!();
     println!("  ▸ Connect:");
-    println!("    zo-tunnel-client connect --server {}:{} --token {} --id my-api --local localhost:3000", server_ip, cfg.control_port, client_token);
+    println!(
+        "    zo-tunnel-client connect --server {}:{} --token {} --id my-api --local localhost:3000",
+        server_ip, cfg.control_port, client_token
+    );
     println!();
     println!("  ▸ Access tunnel:    {}://my-api.{}", scheme, cfg.domain);
-    println!("  ▸ Dashboard:        {}://dashboard.{}", scheme, cfg.domain);
+    println!(
+        "  ▸ Dashboard:        {}://dashboard.{}",
+        scheme, cfg.domain
+    );
     println!();
 
     if config_created {
         println!("  ▸ DNS setup (required):");
-        println!("    Add a wildcard A record: *.{} → {}", cfg.domain, server_ip);
+        println!(
+            "    Add a wildcard A record: *.{} → {}",
+            cfg.domain, server_ip
+        );
         println!();
     }
 
@@ -304,16 +319,21 @@ async fn run_foreground() -> Result<()> {
     let config_path = config::ServerConfig::resolve_config_path()
         .unwrap_or_else(config::ServerConfig::config_path);
 
-    let cfg = config::ServerConfig::load(&config_path)
-        .context("load config")?;
+    let cfg = config::ServerConfig::load(&config_path).context("load config")?;
 
     tracing::info!("╔══════════════════════════════════════╗");
-    tracing::info!("║          Zo Tunnel Server v{}         ║", env!("CARGO_PKG_VERSION"));
+    tracing::info!(
+        "║          Zo Tunnel Server v{}         ║",
+        env!("CARGO_PKG_VERSION")
+    );
     tracing::info!("╚══════════════════════════════════════╝");
 
     tracing::info!(
         "Domain:*.{} | Control:{} | Public:{} | TLS:{}",
-        cfg.domain, cfg.control_port, cfg.public_port, cfg.caddy.enabled,
+        cfg.domain,
+        cfg.control_port,
+        cfg.public_port,
+        cfg.caddy.enabled,
     );
     tracing::info!("Config: {}", config_path.display());
 
@@ -329,8 +349,7 @@ fn cmd_stop() -> Result<()> {
         println!("ℹ️  Service is not running.");
         return Ok(());
     }
-    zo_tunnel_protocol::self_update::stop_service()
-        .context("stop service")?;
+    zo_tunnel_protocol::self_update::stop_service().context("stop service")?;
     println!("  Zo Tunnel Server stopped.");
     Ok(())
 }
@@ -338,11 +357,12 @@ fn cmd_stop() -> Result<()> {
 /// `zo-tunnel-server restart` — restart the systemd service.
 fn cmd_restart() -> Result<()> {
     if !zo_tunnel_protocol::self_update::is_service_installed() {
-        eprintln!("❌ Service not installed. Run `zo-tunnel-server start --domain <domain>` first.");
+        eprintln!(
+            "❌ Service not installed. Run `zo-tunnel-server start --domain <domain>` first."
+        );
         std::process::exit(1);
     }
-    zo_tunnel_protocol::self_update::restart_service()
-        .context("restart service")?;
+    zo_tunnel_protocol::self_update::restart_service().context("restart service")?;
     println!("  Zo Tunnel Server restarted.");
     Ok(())
 }
@@ -384,8 +404,7 @@ fn cmd_status() -> Result<()> {
         }
     };
 
-    let cfg = config::ServerConfig::load(&config_path)
-        .context("load config")?;
+    let cfg = config::ServerConfig::load(&config_path).context("load config")?;
 
     // Check service status
     let service_status = if zo_tunnel_protocol::self_update::is_service_active() {
@@ -411,12 +430,24 @@ fn cmd_status() -> Result<()> {
         println!("  TLS:             via Caddy (on-demand)");
     }
     println!("  Client tokens:   {} configured", cfg.auth.tokens.len());
-    println!("  Dashboard auth:  {}", if cfg.dashboard_auth_enabled() { "enabled" } else { "disabled" });
+    println!(
+        "  Dashboard auth:  {}",
+        if cfg.dashboard_auth_enabled() {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
     println!();
 
     // Show tokens and access info
     let server_ip = detect_server_ip();
-    let client_token = cfg.auth.tokens.first().map(|s| s.as_str()).unwrap_or("(none)");
+    let client_token = cfg
+        .auth
+        .tokens
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("(none)");
     let scheme = if cfg.caddy.enabled { "https" } else { "http" };
 
     println!("  🔑 Client token:     {}", client_token);
@@ -424,20 +455,18 @@ fn cmd_status() -> Result<()> {
     println!();
     println!("  ▸ Server address:    {}:{}", server_ip, cfg.control_port);
     println!("  ▸ Access tunnel:     {}://<name>.{}", scheme, cfg.domain);
-    println!("  ▸ Dashboard:         {}://dashboard.{}", scheme, cfg.domain);
+    println!(
+        "  ▸ Dashboard:         {}://dashboard.{}",
+        scheme, cfg.domain
+    );
     println!();
 
     Ok(())
 }
 
-
-
 /// `zo-tunnel-server upgrade` — self-upgrade from GitHub releases.
 fn cmd_upgrade() -> Result<()> {
-    zo_tunnel_protocol::self_update::upgrade(
-        "zo-tunnel-server",
-        env!("CARGO_PKG_VERSION"),
-    )
+    zo_tunnel_protocol::self_update::upgrade("zo-tunnel-server", env!("CARGO_PKG_VERSION"))
 }
 
 /// `zo-tunnel-server uninstall` — remove binary, service, and config.

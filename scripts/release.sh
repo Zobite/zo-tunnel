@@ -97,6 +97,10 @@ info "cargo clippy..."
 cargo clippy --workspace -- -D warnings 2>&1 || fail "Clippy failed"
 ok "Clippy passed"
 
+info "cargo fmt --check..."
+cargo fmt --all -- --check 2>&1 || fail "Format check failed — run 'cargo fmt' first"
+ok "Format OK"
+
 # ═══════════════════════════════════════════════════════════════
 #  Step 2: Update Versions
 # ═══════════════════════════════════════════════════════════════

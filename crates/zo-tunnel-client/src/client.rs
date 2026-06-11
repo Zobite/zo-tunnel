@@ -122,9 +122,8 @@ impl Client {
                 .with_no_client_auth()
         } else {
             // Production: verify against Mozilla root CAs
-            let root_store = rustls::RootCertStore::from_iter(
-                webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
-            );
+            let root_store =
+                rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
             let crypto_provider = rustls::crypto::ring::default_provider();
             rustls::ClientConfig::builder_with_provider(Arc::new(crypto_provider))
                 .with_safe_default_protocol_versions()
@@ -169,7 +168,11 @@ impl Client {
     }
 
     /// Run authenticated tunnel session with status reporting.
-    async fn run_session_with_status<S>(&self, mut stream: S, status_tx: &watch::Sender<TunnelStatus>) -> Result<()>
+    async fn run_session_with_status<S>(
+        &self,
+        mut stream: S,
+        status_tx: &watch::Sender<TunnelStatus>,
+    ) -> Result<()>
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
@@ -213,7 +216,10 @@ impl Client {
         let yamux_config = yamux::Config::default();
         let mut conn = yamux::Connection::new(compat_stream, yamux_config, yamux::Mode::Client);
 
-        tracing::info!("🚇 Tunnel '{}' active — waiting for connections...", self.client_id);
+        tracing::info!(
+            "🚇 Tunnel '{}' active — waiting for connections...",
+            self.client_id
+        );
 
         loop {
             let maybe_stream = poll_fn(|cx| conn.poll_next_inbound(cx)).await;
@@ -224,21 +230,18 @@ impl Client {
                         let mut yamux_stream = yamux_stream;
                         // Read stream type marker with timeout to avoid blocking
                         let mut marker = [0u8; 1];
-                        let marker_result = tokio::time::timeout(
-                            std::time::Duration::from_secs(5),
-                            async {
+                        let marker_result =
+                            tokio::time::timeout(std::time::Duration::from_secs(5), async {
                                 use futures::io::AsyncReadExt;
                                 yamux_stream.read_exact(&mut marker).await
-                            },
-                        )
-                        .await;
+                            })
+                            .await;
 
                         match marker_result {
                             Ok(Ok(_)) if marker[0] == STREAM_TYPE_HEARTBEAT => {
                                 // Heartbeat ping from server — reply with pong
                                 use futures::io::AsyncWriteExt;
-                                let _ =
-                                    yamux_stream.write_all(&[STREAM_TYPE_HEARTBEAT]).await;
+                                let _ = yamux_stream.write_all(&[STREAM_TYPE_HEARTBEAT]).await;
                                 let _ = yamux_stream.close().await;
                                 tracing::trace!("💓 Heartbeat pong sent");
                             }
@@ -275,10 +278,7 @@ impl Client {
     }
 
     /// Handle a single tunnel stream: pipe yamux ↔ local service.
-    async fn handle_tunnel_stream(
-        yamux_stream: yamux::Stream,
-        local_addr: &str,
-    ) -> Result<()> {
+    async fn handle_tunnel_stream(yamux_stream: yamux::Stream, local_addr: &str) -> Result<()> {
         // Convert yamux futures-io stream to tokio-io compatible
         let mut compat_stream = yamux_stream.compat();
 
@@ -346,8 +346,10 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for NoVerifier {
         _message: &[u8],
         _cert: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
         _dss: &tokio_rustls::rustls::DigitallySignedStruct,
-    ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error>
-    {
+    ) -> Result<
+        tokio_rustls::rustls::client::danger::HandshakeSignatureValid,
+        tokio_rustls::rustls::Error,
+    > {
         Ok(tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
@@ -356,8 +358,10 @@ impl tokio_rustls::rustls::client::danger::ServerCertVerifier for NoVerifier {
         _message: &[u8],
         _cert: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
         _dss: &tokio_rustls::rustls::DigitallySignedStruct,
-    ) -> Result<tokio_rustls::rustls::client::danger::HandshakeSignatureValid, tokio_rustls::rustls::Error>
-    {
+    ) -> Result<
+        tokio_rustls::rustls::client::danger::HandshakeSignatureValid,
+        tokio_rustls::rustls::Error,
+    > {
         Ok(tokio_rustls::rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 

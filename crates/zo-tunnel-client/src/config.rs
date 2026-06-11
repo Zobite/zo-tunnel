@@ -80,8 +80,8 @@ pub struct SavedCredentials {
 
 /// Return the credentials directory: `~/.zo-tunnel/`
 pub fn credentials_dir() -> anyhow::Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
+    let home =
+        std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
     Ok(PathBuf::from(home).join(".zo-tunnel"))
 }
 
@@ -142,9 +142,7 @@ impl SavedCredentials {
 
     /// Check if saved credentials exist.
     pub fn exists() -> bool {
-        credentials_path()
-            .map(|p| p.exists())
-            .unwrap_or(false)
+        credentials_path().map(|p| p.exists()).unwrap_or(false)
     }
 
     /// Return a masked version of the token for display.
@@ -257,7 +255,13 @@ impl TunnelsConfig {
     }
 
     /// Update a tunnel entry by ID.
-    pub fn update_tunnel(&mut self, id: &str, client_id: String, local_addr: String, enabled: bool) -> anyhow::Result<TunnelEntry> {
+    pub fn update_tunnel(
+        &mut self,
+        id: &str,
+        client_id: String,
+        local_addr: String,
+        enabled: bool,
+    ) -> anyhow::Result<TunnelEntry> {
         // Validate inputs
         if client_id.trim().is_empty() {
             anyhow::bail!("client_id cannot be empty");
@@ -267,11 +271,18 @@ impl TunnelsConfig {
         }
 
         // Check uniqueness: client_id must not conflict with another tunnel
-        if self.tunnels.iter().any(|t| t.client_id == client_id && t.id != id) {
+        if self
+            .tunnels
+            .iter()
+            .any(|t| t.client_id == client_id && t.id != id)
+        {
             anyhow::bail!("tunnel with client_id '{}' already exists", client_id);
         }
 
-        let entry = self.tunnels.iter_mut().find(|t| t.id == id)
+        let entry = self
+            .tunnels
+            .iter_mut()
+            .find(|t| t.id == id)
             .ok_or_else(|| anyhow::anyhow!("tunnel '{}' not found", id))?;
 
         entry.client_id = client_id;
@@ -285,7 +296,10 @@ impl TunnelsConfig {
 
     /// Remove a tunnel entry by ID.
     pub fn remove_tunnel(&mut self, id: &str) -> anyhow::Result<TunnelEntry> {
-        let pos = self.tunnels.iter().position(|t| t.id == id)
+        let pos = self
+            .tunnels
+            .iter()
+            .position(|t| t.id == id)
             .ok_or_else(|| anyhow::anyhow!("tunnel '{}' not found", id))?;
         let removed = self.tunnels.remove(pos);
         self.save()?;

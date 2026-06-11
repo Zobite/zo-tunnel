@@ -172,8 +172,7 @@ impl Message {
                 Ok(Message::NewConn(p))
             }
             MessageType::AcceptConn => {
-                let p: AcceptConn =
-                    serde_json::from_slice(payload).context("decode AcceptConn")?;
+                let p: AcceptConn = serde_json::from_slice(payload).context("decode AcceptConn")?;
                 Ok(Message::AcceptConn(p))
             }
             MessageType::Error => {
@@ -360,8 +359,6 @@ mod tests {
         }
     }
 
-
-
     #[tokio::test]
     async fn test_read_from_closed_connection() {
         let (client, mut server) = duplex(1024);
@@ -402,4 +399,3 @@ mod tests {
         assert_eq!(HEARTBEAT_TIMEOUT_SECS, 90);
     }
 }
-

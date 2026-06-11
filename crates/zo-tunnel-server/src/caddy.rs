@@ -53,10 +53,7 @@ impl CaddyConfig {
         }
 
         // Check if caddy binary is in PATH
-        if let Ok(output) = std::process::Command::new("which")
-            .arg("caddy")
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("which").arg("caddy").output() {
             if output.status.success() {
                 return Self {
                     enabled: true,
@@ -181,16 +178,10 @@ impl CaddyManager {
 
             match http_request("PATCH", &patch_url, Some(&body)).await {
                 Ok((200, _)) => {
-                    tracing::info!(
-                        "🔗 Caddy: restored on-demand TLS endpoint: {}",
-                        endpoint
-                    );
+                    tracing::info!("🔗 Caddy: restored on-demand TLS endpoint: {}", endpoint);
                 }
                 Ok((status, _)) => {
-                    tracing::warn!(
-                        "Caddy: failed to restore endpoint (status {})",
-                        status
-                    );
+                    tracing::warn!("Caddy: failed to restore endpoint (status {})", status);
                 }
                 Err(e) => {
                     tracing::warn!("Caddy: failed to restore endpoint: {}", e);
@@ -282,12 +273,7 @@ impl CaddyManager {
                 Some(status)
             }
             Err(e) => {
-                tracing::warn!(
-                    "TLS fallback: '{}' → {} failed: {}",
-                    domain,
-                    endpoint,
-                    e
-                );
+                tracing::warn!("TLS fallback: '{}' → {} failed: {}", domain, endpoint, e);
                 None
             }
         }
@@ -369,13 +355,10 @@ async fn http_request(
         .body(req_body)
         .map_err(|e| anyhow::anyhow!("build request: {}", e))?;
 
-    let resp = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        sender.send_request(req),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("request timeout to {}", url))?
-    .map_err(|e| anyhow::anyhow!("request failed: {}", e))?;
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(5), sender.send_request(req))
+        .await
+        .map_err(|_| anyhow::anyhow!("request timeout to {}", url))?
+        .map_err(|e| anyhow::anyhow!("request failed: {}", e))?;
 
     let status = resp.status().as_u16();
     let body_bytes = resp
@@ -439,8 +422,7 @@ mod tests {
 
     #[test]
     fn test_parse_url_with_query() {
-        let (_, _, path) =
-            parse_url("http://localhost:2615/api/check?domain=test.com").unwrap();
+        let (_, _, path) = parse_url("http://localhost:2615/api/check?domain=test.com").unwrap();
         assert_eq!(path, "/api/check?domain=test.com");
     }
 }
