@@ -10,23 +10,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  # ─── Run tests before building ───
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace -- -D warnings
-
-  # ─── Build matrix ───
   build:
     name: Build ${{ matrix.label }}
-    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -35,6 +23,7 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             label: linux-amd64
+            test: true
 
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
@@ -59,6 +48,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+
+      # Quick smoke test only on linux-amd64 (CI already validates on push)
+      - name: Run tests
+        if: matrix.test
+        run: cargo test --workspace
 
       - name: Install cross-compiler (Linux ARM64)
         if: matrix.cross
@@ -92,7 +86,6 @@ jobs:
           path: "*.tar.gz"
           retention-days: 1
 
-  # ─── Create GitHub Release ───
   release:
     name: Create Release
     needs: build
