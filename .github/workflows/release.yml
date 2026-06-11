@@ -56,11 +56,7 @@ jobs:
 
       - name: Install cross-compiler (Linux ARM64)
         if: matrix.cross
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq gcc-aarch64-linux-gnu
-          mkdir -p .cargo
-          printf '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"\n' >> .cargo/config.toml
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu
 
       - name: Build release binaries
         run: |
